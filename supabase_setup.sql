@@ -1,30 +1,29 @@
 -- ==========================================================================
--- UpMee — Supabase Database Setup SQL
+-- UpMee — Comprehensive Supabase Database Fix SQL
+-- Removes all FK constraints & triggers referencing storage.objects
 -- ==========================================================================
 
--- 1. Drop outdated storage deletion trigger (Supabase blocks direct SQL delete on storage.objects)
+-- 1. Drop any triggers on shares table
 DROP TRIGGER IF EXISTS on_share_deleted ON public.shares;
-DROP FUNCTION IF EXISTS delete_storage_file();
+DROP TRIGGER IF EXISTS delete_storage_file_trigger ON public.shares;
+DROP TRIGGER IF EXISTS tr_delete_storage_file ON public.shares;
+DROP FUNCTION IF EXISTS delete_storage_file() CASCADE;
 
--- 2. Create Shares Table
-CREATE TABLE IF NOT EXISTS public.shares (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  code VARCHAR(10) NOT NULL,
-  type VARCHAR(10) NOT NULL CHECK (type IN ('text', 'file', 'both')),
-  content TEXT NOT NULL,
-  storage_path TEXT,
-  file_name TEXT,
-  file_size BIGINT,
-  one_time_download BOOLEAN DEFAULT false,
-  download_count INT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  expires_at TIMESTAMPTZ NOT NULL
-);
+-- 2. Drop any foreign key constraints pointing to storage.objects
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (
+        SELECT constraint_name
+        FROM information_schema.table_constraints
+        WHERE table_schema = 'public' AND table_name = 'shares' AND constraint_type = 'FOREIGN KEY'
+    ) LOOP
+        EXECUTE 'ALTER TABLE public.shares DROP CONSTRAINT IF EXISTS ' || quote_ident(r.constraint_name);
+    END LOOP;
+END $$;
 
--- Index for expiration lookups
-CREATE INDEX IF NOT EXISTS idx_shares_expires_at ON public.shares(expires_at);
-
--- 3. Row Level Security (RLS) Policies for DB Table
+-- 3. Ensure clean RLS Policies for shares
 ALTER TABLE public.shares ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Allow public select shares" ON public.shares;
