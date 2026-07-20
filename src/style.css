@@ -1,12 +1,12 @@
 /* ==========================================================================
-   UpMee — Modern Soft Pink Design System (Reference UI Match)
-   Font: Kanit
+   UpMee — Unified Modern Soft Pink & Pastel Purple Theme
+   Font: Kanit (Unified across all elements)
    ========================================================================== */
 
 :root {
   --bg-gradient: linear-gradient(180deg, #fdf2f8 0%, #f5f3ff 100%);
   --card-bg: #ffffff;
-  --card-border: rgba(244, 114, 182, 0.25);
+  --card-border: rgba(244, 114, 182, 0.22);
   
   --text-primary: #334155;
   --text-secondary: #64748b;
@@ -20,6 +20,7 @@
   --accent-purple: #8b5cf6;
   --accent-purple-light: #f3e8ff;
   --danger-red: #f43f5e;
+  --danger-red-light: #fff1f2;
 
   --font-family: 'Kanit', -apple-system, BlinkMacSystemFont, sans-serif;
   
@@ -28,8 +29,8 @@
   --radius-input: 12px;
 
   --shadow-card: 0 4px 16px rgba(236, 72, 153, 0.05);
-  --shadow-hover: 0 6px 20px rgba(236, 72, 153, 0.14);
-  --transition: all 0.2s ease;
+  --shadow-hover: 0 6px 20px rgba(236, 72, 153, 0.12);
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Global Resets */
@@ -64,7 +65,7 @@ body {
   z-index: 1;
 }
 
-/* 1. Top Header Bar */
+/* 1. Header Bar */
 .app-header {
   display: flex;
   justify-content: space-between;
@@ -171,7 +172,7 @@ body {
   transition: width 0.4s ease;
 }
 
-/* 3. Cloud Feed Card (On Top of Upload Form) */
+/* 3. Cloud Feed Card */
 .feed-section-card {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
@@ -192,27 +193,27 @@ body {
 }
 
 .icon-refresh-btn {
-  background: #fce7f3;
+  background: #f3e8ff;
   border: none;
-  color: var(--text-pink);
-  width: 34px;
-  height: 34px;
+  color: #8b5cf6;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   transition: var(--transition);
 }
 
 .icon-refresh-btn:hover {
-  background: var(--accent-pink);
-  color: white;
+  background: #e9d5ff;
+  transform: translateY(-1px);
 }
 
 .empty-feed-box {
   text-align: center;
-  padding: 30px 10px;
+  padding: 28px 10px;
   color: #94a3b8;
   font-size: 0.88rem;
   font-weight: 600;
@@ -311,14 +312,14 @@ body {
 }
 
 .icon-action-btn, .icon-action-btn-danger {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border: 1px solid var(--card-border);
+  border: 1px solid rgba(244, 114, 182, 0.3);
   background: var(--accent-pink-subtle);
   color: var(--text-pink);
   text-decoration: none;
@@ -328,10 +329,11 @@ body {
 .icon-action-btn:hover {
   background: var(--accent-pink);
   color: white;
+  transform: translateY(-1px);
 }
 
 .icon-action-btn-danger {
-  background: #fff1f2;
+  background: var(--danger-red-light);
   color: var(--danger-red);
   border-color: #fecdd3;
 }
@@ -339,9 +341,10 @@ body {
 .icon-action-btn-danger:hover {
   background: var(--danger-red);
   color: white;
+  transform: translateY(-1px);
 }
 
-/* 4. Upload Form Card (At the Bottom) */
+/* 4. Upload Form Card */
 .upload-form-card {
   background: var(--card-bg);
   border: 1px solid var(--card-border);
@@ -456,7 +459,7 @@ body {
 .primary-pill-btn {
   width: 100%;
   padding: 12px;
-  background: #fdf2f8;
+  background: var(--accent-pink-subtle);
   border: 1.5px solid var(--accent-pink);
   border-radius: var(--radius-btn);
   font-family: var(--font-family);
@@ -479,7 +482,7 @@ body {
   position: absolute;
   top: 64px;
   right: 16px;
-  width: 320px;
+  width: 310px;
   background: #ffffff;
   border: 1px solid var(--card-border);
   border-radius: 16px;
@@ -527,7 +530,7 @@ body {
   cursor: pointer;
   transition: var(--transition);
   width: 100%;
-  margin: 6px 0;
+  margin: 6px 0 10px 0;
 }
 
 #force-register-push-btn:hover {
@@ -607,9 +610,8 @@ input:checked + .slider:before {
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--text-primary);
-
   display: block;
-  max-width: 160px;
+  max-width: 150px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -629,6 +631,25 @@ input:checked + .slider:before {
 
 .badge-accessed { background: #dcfce7; color: #166534; }
 .badge-active { background: #f1f5f9; color: #475569; }
+
+.icon-btn-danger-outline {
+  background: var(--danger-red-light);
+  border: 1px solid #fecdd3;
+  color: var(--danger-red);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.icon-btn-danger-outline:hover {
+  background: var(--danger-red);
+  color: white;
+}
 
 /* Modals & Backdrop */
 .modal-backdrop {
@@ -671,6 +692,43 @@ input:checked + .slider:before {
   font-size: 1.2rem;
   color: var(--text-secondary);
   cursor: pointer;
+}
+
+.secondary-btn {
+  background: var(--accent-pink-subtle);
+  border: 1px solid var(--card-border);
+  color: var(--text-pink);
+  font-family: var(--font-family);
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: var(--transition);
+  text-decoration: none;
+}
+
+.secondary-btn:hover {
+  background: var(--accent-pink);
+  color: white;
+}
+
+.primary-btn {
+  background: var(--accent-pink);
+  border: 1px solid var(--accent-pink);
+  color: white;
+  font-family: var(--font-family);
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: var(--transition);
+  text-decoration: none;
+}
+
+.primary-btn:hover {
+  background: #db2777;
 }
 
 /* Toast Bar */
