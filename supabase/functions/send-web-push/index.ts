@@ -4,7 +4,7 @@ import webpush from "npm:web-push@3.6.7";
 
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") || "BCKyt1Zaqd4A2WUFCxedHrZCQXSTlOP2EJo9dYTuaOzzJ0suZmAPZkCLEUkggxsQXuDShNwxo2SQzuHQMyfBTjs";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "GnqgoKl1WVzWicq8zCwjlV8O5k1e6xFMLXv6Q4Ttwuk";
-const VAPID_SUBJECT = "mailto:admin@upmee.app";
+const VAPID_SUBJECT = "https://upmee.vercel.app";
 
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
@@ -30,14 +30,14 @@ serve(async (req) => {
     // Fetch active device push subscriptions from database
     const { data: subs, error } = await supabase.from("push_subscriptions").select("*");
     if (error || !subs || subs.length === 0) {
-      console.log("No subscriptions found in DB");
+      console.log("No push subscriptions found in DB");
       return new Response(JSON.stringify({ message: "No active push subscriptions found" }), { 
         status: 200, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
       });
     }
 
-    console.log(`Sending Web Push to ${subs.length} devices...`);
+    console.log(`Sending Web Push to ${subs.length} registered devices...`);
 
     const pushPayload = JSON.stringify({
       title: "UpMee 🐰 มีไฟล์/ข้อความใหม่!",
@@ -46,11 +46,18 @@ serve(async (req) => {
       url: "/"
     });
 
-    const sendPromises = subs.map((sub) =>
-      webpush.sendNotification(sub.subscription, pushPayload).catch((err) => {
-        console.warn("Push delivery error for sub:", err);
-      })
-    );
+    const sendPromises = subs.map(async (sub) => {
+      try {
+        const res = await webpush.sendNotification(sub.subscription, pushPayload);
+        console.log("Push delivered successfully:", res.statusCode);
+      } catch (err: any) {
+        console.warn("Apple APNs / Google FCM Push error:", err.statusCode, err.body || err.message);
+        // Clean up expired tokens (410 Gone / 404 Not Found)
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+        }
+      }
+    });
 
     await Promise.all(sendPromises);
     return new Response(JSON.stringify({ success: true, count: subs.length }), { 
@@ -58,7 +65,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
     });
   } catch (err: any) {
-    console.error("Edge Function error:", err);
+    console.error("Edge Function exception:", err);
     return new Response(JSON.stringify({ error: err.message }), { 
       status: 500, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
