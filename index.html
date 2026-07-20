@@ -39,11 +39,11 @@
       </div>
 
       <div class="header-actions">
-        <!-- Notification Bell Button -->
-        <button id="notify-btn" class="icon-btn icon-only" title="Toggle Notifications">
+        <!-- Upload History Button -->
+        <button id="history-btn" class="icon-btn icon-only" title="Upload History">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
           </svg>
         </button>
 
@@ -179,6 +179,21 @@
         </div>
         <div class="modal-footer">
           <button id="save-config-btn" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload History Modal -->
+    <div id="history-modal" class="modal-backdrop hidden">
+      <div class="modal-card history-modal-card">
+        <div class="modal-header">
+          <h3>🕒 Upload History (ประวัติอัปโหลด)</h3>
+          <button id="close-history-modal-btn" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="history-list-container" class="history-list-container">
+            <div class="loading-spinner-box"><p>Loading history...</p></div>
+          </div>
         </div>
       </div>
     </div>

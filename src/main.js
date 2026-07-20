@@ -5,9 +5,27 @@ import {
   createShareItem,
   getActiveSharesList,
   deleteShareRecordAndStorage,
-  getStorageUsageInfo,
-  subscribeToRealtimeUploads
+  getStorageUsageInfo
 } from './supabase.js';
+
+// Local Storage Key for Accessed Items
+const ACCESSED_ITEMS_KEY = 'upme_accessed_ids';
+
+function getAccessedIds() {
+  try {
+    return JSON.parse(localStorage.getItem(ACCESSED_ITEMS_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function markItemAsAccessed(id) {
+  const list = getAccessedIds();
+  if (!list.includes(id)) {
+    list.push(id);
+    localStorage.setItem(ACCESSED_ITEMS_KEY, JSON.stringify(list));
+  }
+}
 
 // Application State
 let selectedFile = null;
@@ -16,7 +34,11 @@ let deferredPwaPrompt = null;
 let currentActiveItem = null;
 
 // DOM Elements
-const notifyBtn = document.getElementById('notify-btn');
+const historyBtn = document.getElementById('history-btn');
+const historyModal = document.getElementById('history-modal');
+const closeHistoryModalBtn = document.getElementById('close-history-modal-btn');
+const historyListContainer = document.getElementById('history-list-container');
+
 const pillBtns = document.querySelectorAll('.pill-btn');
 const textContent = document.getElementById('text-content');
 const fileInput = document.getElementById('file-input');
@@ -62,7 +84,7 @@ const toast = document.getElementById('toast');
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
-  initNotifications();
+  initHistoryModal();
   initPills();
   initDropzone();
   initForms();
@@ -71,9 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initQrModal();
   initPWA();
   
-  handleIncomingShareAndShortcuts();
   refreshAppFeed();
-  initRealtimeSubscription();
 });
 
 // --- Toast Helper ---
@@ -95,83 +115,73 @@ function formatBytes(bytes, decimals = 1) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// --- Notification Bell & Realtime Push ---
-function initNotifications() {
-  if ('Notification' in window) {
-    if (Notification.permission === 'granted') {
-      notifyBtn.style.color = '#10b981'; // Green active state
-    }
+// --- Upload History Modal Handlers ---
+function initHistoryModal() {
+  historyBtn.addEventListener('click', openHistoryModal);
+  closeHistoryModalBtn.addEventListener('click', closeHistoryModal);
+  historyModal.addEventListener('click', (e) => {
+    if (e.target === historyModal) closeHistoryModal();
+  });
+}
+
+async function openHistoryModal() {
+  historyModal.classList.remove('hidden');
+  historyListContainer.innerHTML = `
+    <div class="loading-spinner-box"><p>Loading history...</p></div>
+  `;
+
+  const shares = await getActiveSharesList();
+  const accessedList = getAccessedIds();
+
+  if (!shares || shares.length === 0) {
+    historyListContainer.innerHTML = `
+      <div class="empty-feed-box"><p>ไม่มีประวัติการอัปโหลดขณะนี้ 🌸</p></div>
+    `;
+    return;
   }
 
-  notifyBtn.addEventListener('click', async () => {
-    if (!('Notification' in window)) {
-      showToast('❌ เบราว์เซอร์ของคุณยังไม่รองรับการแจ้งเตือนนะจ๊ะ');
-      return;
-    }
+  historyListContainer.innerHTML = '';
 
-    if (Notification.permission === 'granted') {
-      showToast('🔔 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว');
-    } else {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        notifyBtn.style.color = '#10b981';
-        showToast('🎉 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว!');
-      } else {
-        showToast('⚠️ ไม่อนุญาตให้เปิดการแจ้งเตือน');
+  shares.forEach(item => {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'history-item-row';
+
+    const uploadTimeStr = new Date(item.created_at).toLocaleString('th-TH');
+    const expiryTimeStr = new Date(item.expires_at).toLocaleString('th-TH');
+    const isAccessed = accessedList.includes(item.id);
+    const titleStr = item.file_name || item.content || 'Item';
+
+    rowEl.innerHTML = `
+      <div class="history-item-info">
+        <span class="history-item-title">${escapeHtml(titleStr)}</span>
+        <span class="history-item-meta">📅 อัปโหลด: ${uploadTimeStr}</span>
+        <span class="history-item-meta">⏱️ ลบเมื่อ: ${expiryTimeStr}</span>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+        <span class="history-status-badge ${isAccessed ? 'badge-accessed' : 'badge-active'}">
+          ${isAccessed ? '🟢 โหลดแล้ว' : '⚪ รอการโหลด'}
+        </span>
+        <button class="icon-btn-danger-outline delete-history-btn" style="padding: 3px 8px; font-size: 0.72rem;">
+          🗑️
+        </button>
+      </div>
+    `;
+
+    rowEl.querySelector('.delete-history-btn').addEventListener('click', async () => {
+      if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+        await deleteShareRecordAndStorage(item.id, item.storage_path);
+        showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
+        await openHistoryModal();
+        await refreshAppFeed();
       }
-    }
+    });
+
+    historyListContainer.appendChild(rowEl);
   });
 }
 
-function initRealtimeSubscription() {
-  subscribeToRealtimeUploads((newRecord) => {
-    // Refresh Cloud Feed & Storage
-    refreshAppFeed();
-
-    // Trigger Mobile/Desktop Native Notification
-    if ('Notification' in window && Notification.permission === 'granted') {
-      const title = 'UpMee 🐰 มีไฟล์/ข้อความใหม่!';
-      const bodyText = newRecord.file_name 
-        ? `อัปโหลดไฟล์ใหม่: ${newRecord.file_name}`
-        : `ข้อความใหม่: ${newRecord.content ? newRecord.content.substring(0, 40) : ''}`;
-
-      const notification = new Notification(title, {
-        body: bodyText,
-        icon: '/bunny_mascot.png',
-        badge: '/icon-192.png'
-      });
-
-      notification.onclick = () => {
-        window.focus();
-        openItemPreviewModal(newRecord);
-      };
-    }
-  });
-}
-
-// --- Web Share Target & Quick Actions Parser ---
-function handleIncomingShareAndShortcuts() {
-  const urlParams = new URLSearchParams(window.location.search);
-
-  // 1. Web Share Target params from OS Share Sheet
-  const sharedTitle = urlParams.get('title');
-  const sharedText = urlParams.get('text');
-  const sharedUrl = urlParams.get('url');
-
-  if (sharedTitle || sharedText || sharedUrl) {
-    const combined = [sharedTitle, sharedText, sharedUrl].filter(Boolean).join('\n');
-    textContent.value = combined;
-    showToast('📥 รับข้อมูลที่แชร์มาจากแอปอื่นเรียบร้อยแล้ว!');
-  }
-
-  // 2. Quick Actions Shortcuts (Home Screen Long Press)
-  const action = urlParams.get('action');
-  if (action === 'paste') {
-    textContent.focus();
-    showToast('📝 พร้อมสำหรับพิมพ์/วางข้อความ');
-  } else if (action === 'file') {
-    fileInput.click();
-  }
+function closeHistoryModal() {
+  historyModal.classList.add('hidden');
 }
 
 // --- Expiration Pill Selector ---
@@ -395,9 +405,16 @@ function initItemModal() {
 
   modalCopyBtn.addEventListener('click', () => {
     if (currentActiveItem && currentActiveItem.content) {
+      markItemAsAccessed(currentActiveItem.id);
       navigator.clipboard.writeText(currentActiveItem.content).then(() => {
         showToast('📋 Copied to clipboard!');
       });
+    }
+  });
+
+  modalDownloadBtn.addEventListener('click', () => {
+    if (currentActiveItem) {
+      markItemAsAccessed(currentActiveItem.id);
     }
   });
 

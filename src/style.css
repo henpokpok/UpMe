@@ -25,6 +25,7 @@
   --text-pink: #9d174d;
 
   --danger-color: #f43f5e;
+  --success-color: #10b981;
 
   --border-radius-cloud: 32px;
   --border-radius-lg: 20px;
@@ -148,15 +149,15 @@ body {
   transform: scale(1.1);
 }
 
-/* Red Notification Bell Icon */
-#notify-btn {
-  color: #f43f5e !important;
-  background: #ffe4e6 !important;
-  border-color: #fecdd3 !important;
+/* History Header Button */
+#history-btn {
+  color: #7e22ce !important;
+  background: #f3e8ff !important;
+  border-color: #e9d5ff !important;
 }
 
-#notify-btn:hover {
-  background: #fecdd3 !important;
+#history-btn:hover {
+  background: #e9d5ff !important;
   transform: scale(1.1);
 }
 
@@ -510,7 +511,7 @@ textarea:focus, input:focus {
 
 .icon-btn-danger-outline:hover { background: #ffe4e6; }
 
-/* Item Preview Modal */
+/* Modals */
 .modal-backdrop {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -536,6 +537,10 @@ textarea:focus, input:focus {
   box-shadow: 0 20px 40px rgba(244, 114, 182, 0.2);
 }
 
+.history-modal-card {
+  max-width: 520px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
@@ -544,12 +549,8 @@ textarea:focus, input:focus {
   padding-bottom: 8px;
 }
 
-.item-type-badge {
-  font-size: 0.78rem;
-  font-weight: 700;
-  padding: 4px 10px;
-  border-radius: 12px;
-  background: #fce7f3;
+.modal-header h3 {
+  font-size: 1.05rem;
   color: var(--text-pink);
 }
 
@@ -561,6 +562,67 @@ textarea:focus, input:focus {
   cursor: pointer;
 }
 
+/* Upload History List */
+.history-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.history-item-row {
+  background: #fdf2f8;
+  border: 1.5px solid #fbcfe8;
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.history-item-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-dark);
+  word-break: break-all;
+}
+
+.history-item-meta {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.history-status-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-accessed {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.badge-active {
+  background: #fce7f3;
+  color: var(--text-pink);
+}
+
+/* Item Preview Modal */
 .modal-preview-box {
   display: flex;
   flex-direction: column;
