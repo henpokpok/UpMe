@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>upMe 🐰 — ส่งข้อความและไฟล์สุดน่ารัก ข้ามอุปกรณ์</title>
+  <title>upMe 🐰 — ฝากและรับข้อความ/ไฟล์สุดน่ารัก</title>
   
   <!-- SEO & Meta -->
-  <meta name="description" content="แอปส่งข้อความ ลิงก์ และไฟล์ข้ามอุปกรณ์ (Windows, Android, iPadOS) แบบง่ายๆ สุดน่ารัก ไม่ต้องล็อกอิน" />
+  <meta name="description" content="แอปส่วนตัวฝากข้อความ ลิงก์ และไฟล์ข้ามอุปกรณ์ (Windows, Android, iPadOS) แบบง่ายๆ ไม่ต้องใส่รหัสผ่าน" />
   <meta name="theme-color" content="#fce7f3" />
   
   <!-- PWA -->
@@ -16,7 +16,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="upMe Bunny" />
   
-  <!-- Google Fonts: Kanit (Thai) & Fredoka (Cute English & Numbers) -->
+  <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -25,29 +25,29 @@
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 <body>
-  <!-- Decorative Floating Pastel Bubbles -->
+  <!-- Decorative Floating Background Bubbles -->
   <div class="bg-bubble bubble-1"></div>
   <div class="bg-bubble bubble-2"></div>
   <div class="bg-bubble bubble-3"></div>
 
   <div id="app">
-    <!-- Cute Header -->
+    <!-- Header -->
     <header class="app-header">
       <div class="logo-area">
         <img src="/bunny_mascot.png" alt="upMe Bunny Mascot" class="bunny-logo-img" />
         <div class="logo-title-group">
           <span class="logo-text">up<span class="accent-text">Me</span> 🐰</span>
-          <span class="logo-subtitle">ฝากและรับไฟล์ข้ามเครื่องสุดน่ารัก</span>
+          <span class="logo-subtitle">แอปแชร์ไฟล์และข้อความส่วนตัวข้ามอุปกรณ์</span>
         </div>
       </div>
 
       <div class="header-actions">
-        <button id="pwa-install-btn" class="icon-btn hidden" title="ติดตั้งแอปพลิเคชัน">
+        <button id="pwa-install-btn" class="icon-btn hidden" title="ติดตั้งแอปพลิเคชันลงเครื่อง">
           <span>📲 ติดตั้งแอป</span>
         </button>
 
-        <button id="settings-btn" class="icon-btn" title="ตั้งค่า Supabase">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button id="settings-btn" class="icon-btn" title="ตั้งค่า Supabase Project">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
@@ -55,45 +55,45 @@
       </div>
     </header>
 
-    <!-- Single Page Main Container -->
+    <!-- Mini Storage Quota Bar -->
+    <div class="storage-bar-card">
+      <div class="storage-bar-info">
+        <span class="storage-bar-title">📊 ความจุ Supabase Storage (Free Quota)</span>
+        <span id="storage-usage-text" class="storage-usage-text">0 MB / 1,000 MB (0 รายการ)</span>
+      </div>
+      <div class="progress-bar-track">
+        <div id="storage-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
+      </div>
+    </div>
+
+    <!-- Main Container -->
     <main class="main-container">
 
       <!-- ==========================================
-           SECTION 1: 🎀 ส่งข้อความ / อัปโหลดไฟล์ (SEND)
+           SECTION 1: 🌸 อัปโหลดข้อความ / ลิงก์ / ไฟล์
            ========================================== -->
-      <section class="page-card send-card">
+      <section class="page-card">
         <div class="card-title-group">
-          <span class="section-emoji">🎀</span>
-          <h2>ฝากส่งข้อความ หรือ ไฟล์</h2>
+          <span class="section-emoji">🌸</span>
+          <h2>ฝากข้อความ ลิงก์ หรือ ไฟล์</h2>
         </div>
 
-        <!-- Mode Selector Switcher -->
-        <div class="content-type-toggle">
-          <button class="type-btn active" data-type="text">
-            <span>📝 ข้อความ / ลิงก์</span>
-          </button>
-          <button class="type-btn" data-type="file">
-            <span>📁 อัปโหลดไฟล์ (สูงสุด 50MB)</span>
-          </button>
-        </div>
-
-        <!-- Form Box -->
         <form id="share-form" class="inner-form">
           <!-- Text Input Area -->
-          <div id="text-input-group" class="form-group">
-            <label for="text-content">พิมพ์ข้อความ ลิงก์ หรือโน้ตที่นี่ 💭</label>
-            <textarea id="text-content" rows="4" placeholder="พิมพ์ข้อความ แปะลิงก์เว็บ หรือวางเนื้อหาที่นี่เลยจ้า..." required></textarea>
+          <div class="form-group">
+            <label for="text-content">พิมพ์ข้อความ ลิงก์ หรือคำอธิบาย 💭</label>
+            <textarea id="text-content" rows="3" placeholder="แปะลิงก์เว็บ ข้อความ รหัส หรือคำอธิบายที่ต้องการฝากไว้ที่นี่..."></textarea>
           </div>
 
-          <!-- File Upload Dropzone -->
-          <div id="file-input-group" class="form-group hidden">
-            <label>เลือกไฟล์ที่ต้องการส่ง 🌸</label>
+          <!-- File Upload Attachment Box -->
+          <div class="form-group">
+            <label>📎 แนบไฟล์ (รูปภาพ, เอกสาร, วิดีโอ ไม่เกิน 50MB)</label>
             <div id="dropzone" class="file-dropzone">
               <input type="file" id="file-input" class="hidden-file-input" />
               <div class="dropzone-content">
-                <div class="dropzone-icon">✨</div>
-                <p class="dropzone-title">ลากไฟล์มาวางที่นี่ หรือ <span class="browse-btn">คลิกเพื่อเลือกไฟล์</span></p>
-                <p class="dropzone-subtitle">รองรับ รูปภาพ, เอกสาร, วิดีโอ, เสียง (ไม่เกิน 50MB)</p>
+                <span class="dropzone-icon">✨</span>
+                <p class="dropzone-title">คลิกที่นี่เพื่อเลือกไฟล์ หรือ <span class="browse-btn">ลากไฟล์มาวาง</span></p>
+                <p class="dropzone-subtitle">รองรับไฟล์ทุกประเภท (สูงสุด 50MB ต่อไฟล์)</p>
               </div>
               <div id="file-preview" class="file-preview hidden">
                 <div class="file-info">
@@ -103,93 +103,66 @@
                     <span id="file-size" class="file-size">2.4 MB</span>
                   </div>
                 </div>
-                <button type="button" id="remove-file-btn" class="icon-btn-danger" title="ลบไฟล์">&times;</button>
+                <button type="button" id="remove-file-btn" class="icon-btn-danger" title="ลบไฟล์แนบ">&times;</button>
               </div>
             </div>
           </div>
 
-          <!-- Options Grid -->
-          <div class="options-grid">
-            <!-- Expiration Dropdown -->
-            <div class="form-group">
-              <label for="expiry-select">⏱️ ระยะเวลาหมดอายุ</label>
-              <select id="expiry-select" class="styled-select">
-                <option value="1h">1 ชั่วโมง</option>
-                <option value="8h">8 ชั่วโมง</option>
-                <option value="24h" selected>24 ชั่วโมง (1 วัน)</option>
-                <option value="7d">7 วัน</option>
-              </select>
-            </div>
-
-            <!-- One-time download toggle -->
-            <div class="form-group toggle-group">
-              <label class="toggle-label" for="one-time-toggle">
-                <div class="toggle-switch">
-                  <input type="checkbox" id="one-time-toggle" />
-                  <span class="slider"></span>
-                </div>
-                <div class="toggle-text">
-                  <span class="toggle-title">🔥 ลบทันทีหลังรับ</span>
-                  <span class="toggle-desc">ลบจากเซิร์ฟเวอร์ทันทีเมื่อเปิดอ่าน/โหลด</span>
-                </div>
-              </label>
+          <!-- Horizontal Expiration Pill Buttons (1, 8, 24, 7 วัน) -->
+          <div class="form-group">
+            <label>⏱️ เลือกระยะเวลาหมดอายุ (ระบบลบให้อัตโนมัติ)</label>
+            <div class="expiry-pills">
+              <button type="button" class="pill-btn" data-value="1h">1 ชม.</button>
+              <button type="button" class="pill-btn" data-value="8h">8 ชม.</button>
+              <button type="button" class="pill-btn active" data-value="24h">24 ชม.</button>
+              <button type="button" class="pill-btn" data-value="7d">1 อาทิตย์</button>
             </div>
           </div>
 
-          <!-- Primary Submit Button -->
+          <!-- Main Submit Button -->
           <button type="submit" id="submit-share-btn" class="primary-btn">
-            <span>💖 สร้างรหัสส่งของ (Generate Passcode)</span>
+            <span>💖 อัปโหลด & แชร์รายการ</span>
           </button>
         </form>
+      </section>
 
-        <!-- Sender Result Container -->
-        <div id="share-result" class="result-card hidden">
-          <div class="result-header">
-            <span class="success-icon">🎉</span>
-            <h3>สร้างรหัสรับของเรียบร้อยแล้ว!</h3>
+      <!-- ==========================================
+           SECTION 2: 📦 รายการล่าสุดของคุณ (LIVE FEED)
+           ========================================== -->
+      <section class="page-card">
+        <div class="card-title-group">
+          <div class="title-with-refresh">
+            <span class="section-emoji">📦</span>
+            <h2>รายการที่กำลังแชร์อยู่ของคุณ</h2>
           </div>
+          <button id="refresh-feed-btn" class="icon-btn" title="รีเฟรชรายการ">
+            <span>🔄 รีเฟรช</span>
+          </button>
+        </div>
+        <p class="section-desc">ดูข้อความและดาวน์โหลดไฟล์ที่คุณฝากไว้ข้ามอุปกรณ์ได้ทันที โดยไม่ต้องกรอกรหัสผ่าน!</p>
 
-          <div class="passcode-box">
-            <span class="passcode-label">รหัสผ่าน 6 หลักของคุณคือ</span>
-            <div class="passcode-display">
-              <span id="result-passcode">123456</span>
-              <button id="copy-code-btn" class="copy-btn" title="คัดลอกรหัส">
-                📋 คัดลอก
-              </button>
-            </div>
+        <!-- Dynamic Feed List Container -->
+        <div id="live-feed-container" class="live-feed-list">
+          <div class="loading-spinner-box">
+            <span class="loading-emoji">⏳</span>
+            <p>กำลังโหลดรายการล่าสุดของคุณ...</p>
           </div>
-
-          <!-- QR Code & Direct URL -->
-          <div class="qr-share-section">
-            <div class="qr-container">
-              <canvas id="qr-canvas"></canvas>
-            </div>
-            <div class="qr-info">
-              <p class="qr-hint">สแกนด้วยกล้องมือถือ/iPad เพื่อเปิดดูได้ทันที 📱</p>
-              <div class="direct-url-box">
-                <input type="text" id="result-url" readonly />
-                <button id="copy-url-btn" class="icon-btn" title="คัดลอกลิงก์">📋 ลิงก์</button>
-              </div>
-            </div>
-          </div>
-
-          <button id="create-another-btn" class="secondary-btn">✨ ส่งใหม่อีกรายการ</button>
         </div>
       </section>
 
       <!-- ==========================================
-           SECTION 2: 🎁 รับข้อความ / ไฟล์ (RECEIVE)
+           SECTION 3: 🔑 ค้นหาด้วยรหัสผ่าน 6 หลัก (FALLBACK)
            ========================================== -->
-      <section class="page-card receive-card" id="receive-section">
+      <section class="page-card search-fallback-card">
         <div class="card-title-group">
-          <span class="section-emoji">🎁</span>
-          <h2>รับข้อความ หรือ ไฟล์</h2>
+          <span class="section-emoji">🔑</span>
+          <h2>ดึงข้อมูลด้วยรหัส 6 หลัก หรือ QR Code</h2>
         </div>
-        <p class="receive-desc">ใส่รหัส 6 หลักที่ได้รับจากผู้ส่ง เพื่อดูข้อความหรือดาวน์โหลดไฟล์</p>
+        <p class="section-desc">ใช้กรณีสแกน QR Code หรือป้อนรหัสจากอุปกรณ์อื่น</p>
 
         <form id="receive-form" class="passcode-input-form">
           <div class="passcode-input-wrapper">
-            <input type="text" id="receive-code-input" placeholder="เช่น 123456" maxlength="8" autocomplete="off" required />
+            <input type="text" id="receive-code-input" placeholder="เช่น 123456" maxlength="8" autocomplete="off" />
             <button type="submit" id="retrieve-btn" class="primary-btn search-btn">
               <span>🐰 รับข้อมูล</span>
             </button>
@@ -197,14 +170,12 @@
         </form>
 
         <!-- Retrieval Output Container -->
-        <div id="receive-output" class="receive-output-container hidden">
-          <!-- Dynamically populated output -->
-        </div>
+        <div id="receive-output" class="receive-output-container hidden"></div>
 
         <!-- Error Alert -->
         <div id="receive-error" class="error-alert hidden">
           <span>😿</span>
-          <span id="error-message">รหัสไม่ถูกต้อง หรือไฟล์หมดอายุแล้วจ้า</span>
+          <span id="error-message">รหัสไม่ถูกต้อง หรือรายการหมดอายุไปแล้วจ้า</span>
         </div>
       </section>
 
@@ -230,6 +201,23 @@
         </div>
         <div class="modal-footer">
           <button id="save-config-btn" class="primary-btn">บันทึกการตั้งค่า 💖</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR Modal -->
+    <div id="qr-modal" class="modal-backdrop hidden">
+      <div class="modal-card qr-modal-card">
+        <div class="modal-header">
+          <h3>📱 QR Code สำหรับเปิดบนมือถือ/iPad</h3>
+          <button id="close-qr-modal-btn" class="close-btn">&times;</button>
+        </div>
+        <div class="qr-modal-body">
+          <canvas id="qr-modal-canvas"></canvas>
+          <div class="passcode-box">
+            <span class="passcode-label">รหัสผ่าน 6 หลักคือ</span>
+            <span id="qr-modal-passcode" class="passcode-highlight">123456</span>
+          </div>
         </div>
       </div>
     </div>
