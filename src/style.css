@@ -28,7 +28,7 @@
   --radius-input: 12px;
 
   --shadow-card: 0 4px 16px rgba(236, 72, 153, 0.05);
-  --shadow-hover: 0 6px 20px rgba(236, 72, 153, 0.12);
+  --shadow-hover: 0 6px 20px rgba(236, 72, 153, 0.14);
   --transition: all 0.2s ease;
 }
 
@@ -398,11 +398,21 @@ body {
   text-align: center;
   cursor: pointer;
   transition: var(--transition);
+  position: relative;
 }
 
 .dropzone-dashed-box:hover, .dropzone-dashed-box.drag-over {
   background: var(--accent-pink-subtle);
   border-color: var(--accent-pink);
+}
+
+.hidden-file-input {
+  display: none !important;
+  opacity: 0 !important;
+  position: absolute !important;
+  width: 0 !important;
+  height: 0 !important;
+  pointer-events: none !important;
 }
 
 .dropzone-text {
@@ -503,6 +513,26 @@ body {
   font-size: 0.88rem;
   font-weight: 700;
   color: var(--text-pink);
+}
+
+#force-register-push-btn {
+  background: var(--accent-pink-subtle);
+  border: 1.5px solid var(--accent-pink);
+  color: var(--text-pink);
+  font-family: var(--font-family);
+  font-weight: 600;
+  font-size: 0.78rem;
+  padding: 8px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: var(--transition);
+  width: 100%;
+  margin: 6px 0;
+}
+
+#force-register-push-btn:hover {
+  background: var(--accent-pink);
+  color: white;
 }
 
 .notify-toggle-wrapper {
