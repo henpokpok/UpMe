@@ -117,26 +117,32 @@ function formatBytes(bytes, decimals = 1) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-function formatRemainingTime(expiresAtISO) {
+// Clean concise remaining time format without the word "เหลือ"
+function formatRemainingTimeClean(expiresAtISO) {
   const diffMs = new Date(expiresAtISO) - new Date();
-  if (diffMs <= 0) return 'หมดอายุแล้ว';
+  if (diffMs <= 0) return 'Expired';
   const totalMins = Math.floor(diffMs / (1000 * 60));
   const hours = Math.floor(totalMins / 60);
   const mins = totalMins % 60;
   if (hours >= 24) {
     const days = Math.floor(hours / 24);
-    return `เหลือ ${days} วัน`;
+    return `${days} วัน`;
   }
   if (hours > 0) {
-    return `เหลือ ${hours} ชม. ${mins} นาที`;
+    return `${hours} ชม. ${mins} นาที`;
   }
-  return `เหลือ ${mins} นาที`;
+  return `${mins} นาที`;
+}
+
+// Short time format e.g. "07:31 PM"
+function formatShortTime(createdAtISO) {
+  return new Date(createdAtISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 function calculateConfiguredHoursText(createdAtISO, expiresAtISO) {
   const diffHours = Math.round((new Date(expiresAtISO) - new Date(createdAtISO)) / (1000 * 60 * 60));
-  if (diffHours >= 168) return '7 วัน';
-  return `${diffHours} ชม.`;
+  if (diffHours >= 168) return '7d';
+  return `${diffHours}h`;
 }
 
 // --- Chat Bubble Popover (History + Notifications Toggle) ---
@@ -204,7 +210,7 @@ async function openHistoryPopover() {
     const rowEl = document.createElement('div');
     rowEl.className = 'history-item-row';
 
-    const uploadTimeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const uploadTimeStr = formatShortTime(item.created_at);
     const isAccessed = accessedList.includes(item.id);
     const titleStr = item.file_name || item.content || 'Item';
 
@@ -447,7 +453,7 @@ async function refreshAppFeed() {
   }
 }
 
-// --- Render Horizontal Rectangle Items in Cloud ---
+// --- Render Sleek Horizontal Rectangle Items ---
 function renderCloudItemBubbles(sharesList) {
   liveFeedContainer.innerHTML = '';
 
@@ -459,11 +465,11 @@ function renderCloudItemBubbles(sharesList) {
     const isFile = item.type === 'file' || item.type === 'both';
     const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
-    // 1. Left Square Thumbnail (Clickable to open popup modal)
+    // 1. Left Square Thumbnail (Stretch Image edge-to-edge)
     let squareThumbHtml = '';
     if (isImage && item.content) {
       squareThumbHtml = `
-        <div class="cloud-item-square-thumb" title="Click to view large preview">
+        <div class="cloud-item-square-thumb" title="Click for large preview">
           <img src="${item.content}" alt="preview" class="cloud-thumb-img" />
         </div>
       `;
@@ -472,7 +478,7 @@ function renderCloudItemBubbles(sharesList) {
       if (isFile) icon = '📁';
       else if (isUrl) icon = '🔗';
       squareThumbHtml = `
-        <div class="cloud-item-square-thumb" title="Click to view details">
+        <div class="cloud-item-square-thumb" title="Click for details">
           <span class="cloud-thumb-icon">${icon}</span>
         </div>
       `;
@@ -480,36 +486,59 @@ function renderCloudItemBubbles(sharesList) {
 
     // 2. Right Info & Timestamps
     const titleStr = item.file_name || item.content || 'Item';
-    const uploadTimeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const remainingTimePinkStr = formatRemainingTime(item.expires_at);
+    const shortUploadTime = formatShortTime(item.created_at);
+    const remainingTimePinkStr = formatRemainingTimeClean(item.expires_at);
     const durationBadgeText = calculateConfiguredHoursText(item.created_at, item.expires_at);
 
+    // SVG Action Buttons
+    const downloadSvgIcon = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+    `;
+
+    const copySvgIcon = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+      </svg>
+    `;
+
+    const deleteSvgIcon = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+      </svg>
+    `;
+
     cardEl.innerHTML = `
-      <!-- Top-Right Duration Badge -->
+      <!-- Top-Right Duration Hours Badge -->
       <span class="cloud-item-duration-badge">${durationBadgeText}</span>
 
-      <!-- Left Square Thumbnail -->
+      <!-- Left Square Thumbnail (Clickable) -->
       ${squareThumbHtml}
 
       <!-- Right Info Area -->
       <div class="cloud-item-right-info">
         <span class="cloud-item-title-text">${escapeHtml(titleStr)}</span>
-        <span class="cloud-item-upload-time">อัปโหลดเมื่อ: ${uploadTimeStr}</span>
+        <span class="cloud-item-upload-time">${shortUploadTime}</span>
         <span class="cloud-item-remaining-pink">${remainingTimePinkStr}</span>
         
-        <!-- Bottom-Right Action Buttons -->
+        <!-- Bottom-Right Small Circular SVG Action Buttons -->
         <div class="cloud-item-bottom-actions">
-          <button type="button" class="cloud-act-btn-danger quick-delete-btn" title="Delete">
-            🗑️ Delete
+          <button type="button" class="icon-action-btn-danger quick-delete-btn" title="Delete">
+            ${deleteSvgIcon}
           </button>
 
           ${isFile ? `
-            <a href="${item.content}" download="${escapeHtml(item.file_name || 'download')}" class="cloud-act-btn quick-save-btn" title="Download">
-              🌸 Download
+            <a href="${item.content}" download="${escapeHtml(item.file_name || 'download')}" class="icon-action-btn quick-save-btn" title="Download">
+              ${downloadSvgIcon}
             </a>
           ` : `
-            <button type="button" class="cloud-act-btn quick-copy-btn" title="Copy">
-              📋 Copy
+            <button type="button" class="icon-action-btn quick-copy-btn" title="Copy">
+              ${copySvgIcon}
             </button>
           `}
         </div>
@@ -532,7 +561,7 @@ function renderCloudItemBubbles(sharesList) {
         e.stopPropagation();
         markItemAsAccessed(item.id);
         navigator.clipboard.writeText(item.content).then(() => {
-          showToast('📋 Copied to clipboard!');
+          showToast('📋 Copied!');
         });
       });
     }
@@ -574,7 +603,7 @@ function initItemModal() {
     if (currentActiveItem && currentActiveItem.content) {
       markItemAsAccessed(currentActiveItem.id);
       navigator.clipboard.writeText(currentActiveItem.content).then(() => {
-        showToast('📋 Copied to clipboard!');
+        showToast('📋 Copied!');
       });
     }
   });
