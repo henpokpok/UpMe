@@ -1,11 +1,21 @@
-const CACHE_NAME = 'upmee-pwa-v2';
+const CACHE_NAME = 'upmee-pwa-v3';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cache) => {
+          if (cache !== CACHE_NAME) {
+            return caches.delete(cache);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 // Service Worker Push Event Handler for Mobile Background Notifications
