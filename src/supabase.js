@@ -3,9 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 const STORAGE_URL_KEY = 'upme_supabase_url';
 const STORAGE_ANON_KEY = 'upme_supabase_anon_key';
 
+const DEFAULT_SUPABASE_URL = 'https://sdsrxmetbtdzhooxqkkh.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_GYM_eBLwWpct8GT6pPuc-g_r_9zEr_1';
+
 export function getSupabaseConfig() {
-  const url = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem(STORAGE_URL_KEY) || '';
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.getItem(STORAGE_ANON_KEY) || '';
+  const url = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem(STORAGE_URL_KEY) || DEFAULT_SUPABASE_URL;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.getItem(STORAGE_ANON_KEY) || DEFAULT_SUPABASE_ANON_KEY;
   return { url, key };
 }
 
