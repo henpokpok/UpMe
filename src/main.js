@@ -235,10 +235,16 @@ async function openHistoryPopover() {
       e.stopPropagation();
 
       if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-        await deleteShareRecordAndStorage(item.id, item.storage_path);
-        showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
+        const deleted = await deleteShareRecordAndStorage(item.id, item.storage_path);
+        if (deleted) {
+          showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
+        } else {
+          showToast('❌ เกิดข้อผิดพลาดในการลบ');
+        }
         await refreshAppFeed();
-        await openHistoryPopover();
+        if (!historyPopover.classList.contains('hidden')) {
+          await openHistoryPopover();
+        }
       }
     });
 
@@ -416,10 +422,16 @@ async function refreshAppFeed() {
   try {
     const { totalBytes } = await getStorageUsageInfo();
     const TOTAL_CAPACITY = 1000 * 1024 * 1024; // 1,000 MB (1 GB)
-    const percentage = Math.min(100, ((totalBytes / TOTAL_CAPACITY) * 100)).toFixed(1);
+    const percentageNum = (totalBytes / TOTAL_CAPACITY) * 100;
+    const percentage = percentageNum > 0 && percentageNum < 0.1 ? '0.1%' : `${percentageNum.toFixed(1)}%`;
 
-    storageUsageText.textContent = `${percentage}%`;
-    storageProgressFill.style.width = `${percentage}%`;
+    if (totalBytes > 0) {
+      storageUsageText.textContent = `${formatBytes(totalBytes)} (${percentage})`;
+    } else {
+      storageUsageText.textContent = `0%`;
+    }
+
+    storageProgressFill.style.width = `${Math.max(0, Math.min(100, percentageNum))}%`;
   } catch (err) {
     console.error('Error calculating storage percentage:', err);
   }
@@ -581,8 +593,12 @@ function renderCloudItemBubbles(sharesList) {
       quickDeleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-          await deleteShareRecordAndStorage(item.id, item.storage_path);
-          showToast('🗑️ Deleted!');
+          const deleted = await deleteShareRecordAndStorage(item.id, item.storage_path);
+          if (deleted) {
+            showToast('🗑️ Deleted!');
+          } else {
+            showToast('❌ Delete failed');
+          }
           await refreshAppFeed();
         }
       });

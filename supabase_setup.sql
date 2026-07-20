@@ -1,111 +1,51 @@
--- ============================================================================
--- upMe — Supabase PostgreSQL Schema, Storage, RLS, and Cleanup Setup
--- Execute this entire script inside your Supabase SQL Editor
--- ============================================================================
+-- ==========================================================================
+-- UpMee — Supabase Database & Storage Setup SQL
+-- ==========================================================================
 
--- 1. DATABASE SCHEMA SETUP
+-- 1. Create Shares Table
 CREATE TABLE IF NOT EXISTS public.shares (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code VARCHAR(6) NOT NULL,
-    type VARCHAR(10) NOT NULL CHECK (type IN ('text', 'file', 'both')),
-    content TEXT NOT NULL,
-    storage_path TEXT DEFAULT NULL,
-    file_name TEXT DEFAULT NULL,
-    file_size BIGINT DEFAULT NULL,
-    one_time_download BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code VARCHAR(10) NOT NULL,
+  type VARCHAR(10) NOT NULL CHECK (type IN ('text', 'file', 'both')),
+  content TEXT NOT NULL,
+  storage_path TEXT,
+  file_name TEXT,
+  file_size BIGINT,
+  one_time_download BOOLEAN DEFAULT false,
+  download_count INT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
 );
 
--- Create performance indexes for rapid retrieval & expiry cleanup
-CREATE INDEX IF NOT EXISTS idx_shares_code ON public.shares (code);
-CREATE INDEX IF NOT EXISTS idx_shares_expires_at ON public.shares (expires_at);
+-- Index for expiration lookups
+CREATE INDEX IF NOT EXISTS idx_shares_expires_at ON public.shares(expires_at);
 
--- 2. ROW LEVEL SECURITY (RLS) POLICIES
+-- 2. Row Level Security (RLS) Policies for DB Table
 ALTER TABLE public.shares ENABLE ROW LEVEL SECURITY;
 
--- Allow anonymous users to SELECT non-expired shares
-CREATE POLICY "Allow public select active shares" 
-ON public.shares 
-FOR SELECT 
-TO anon, authenticated 
-USING (expires_at > now());
+DROP POLICY IF EXISTS "Allow public select shares" ON public.shares;
+CREATE POLICY "Allow public select shares" ON public.shares FOR SELECT TO anon, authenticated USING (true);
 
--- Allow anonymous users to INSERT new shares
-CREATE POLICY "Allow public insert shares" 
-ON public.shares 
-FOR INSERT 
-TO anon, authenticated 
-WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow public insert shares" ON public.shares;
+CREATE POLICY "Allow public insert shares" ON public.shares FOR INSERT TO anon, authenticated WITH CHECK (true);
 
--- Allow anonymous users to DELETE shares
-CREATE POLICY "Allow public delete shares" 
-ON public.shares 
-FOR DELETE 
-TO anon, authenticated 
-USING (true);
+DROP POLICY IF EXISTS "Allow public delete shares" ON public.shares;
+CREATE POLICY "Allow public delete shares" ON public.shares FOR DELETE TO anon, authenticated USING (true);
 
-
--- 3. ENABLE SUPABASE REALTIME PUBLICATION ON SHARES TABLE
--- Enables instant WebSocket broadcasts across mobile/desktop when a new row is inserted
-ALTER PUBLICATION supabase_realtime ADD TABLE public.shares;
-
-
--- 4. SUPABASE STORAGE BUCKET CONFIGURATION ('user-shares')
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES (
-  'user-shares', 
-  'user-shares', 
-  true, 
-  52428800, -- 50MB in bytes
-  NULL
-)
-ON CONFLICT (id) DO UPDATE 
-SET public = true, file_size_limit = 52428800;
+-- 3. Storage Bucket Setup for 'user-shares'
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('user-shares', 'user-shares', true) 
+ON CONFLICT (id) DO NOTHING;
 
 -- Storage RLS Policies
-CREATE POLICY "Public Read Access for user-shares"
-ON storage.objects FOR SELECT
-TO anon, authenticated
-USING (bucket_id = 'user-shares');
+DROP POLICY IF EXISTS "Public Access Shares Bucket" ON storage.objects;
+CREATE POLICY "Public Access Shares Bucket" ON storage.objects FOR SELECT USING (bucket_id = 'user-shares');
 
-CREATE POLICY "Public Upload Access for user-shares"
-ON storage.objects FOR INSERT
-TO anon, authenticated
-WITH CHECK (bucket_id = 'user-shares');
+DROP POLICY IF EXISTS "Public Upload Shares Bucket" ON storage.objects;
+CREATE POLICY "Public Upload Shares Bucket" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'user-shares');
 
-CREATE POLICY "Public Delete Access for user-shares"
-ON storage.objects FOR DELETE
-TO anon, authenticated
-USING (bucket_id = 'user-shares');
+DROP POLICY IF EXISTS "Public Delete Shares Bucket" ON storage.objects;
+CREATE POLICY "Public Delete Shares Bucket" ON storage.objects FOR DELETE USING (bucket_id = 'user-shares');
 
-
--- 5. BACKGROUND AUTO-DESTRUCT SYSTEM (pg_cron)
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-
-SELECT cron.schedule(
-    'auto-delete-expired-shares',
-    '*/5 * * * *',
-    $$ DELETE FROM public.shares WHERE expires_at < now(); $$
-);
-
-
--- 6. AUTOMATIC STORAGE FILE CLEANUP ON RECORD DELETION
-CREATE OR REPLACE FUNCTION public.handle_deleted_share_storage()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF OLD.storage_path IS NOT NULL AND OLD.storage_path != '' THEN
-        DELETE FROM storage.objects 
-        WHERE bucket_id = 'user-shares' 
-          AND name = OLD.storage_path;
-    END IF;
-    RETURN OLD;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-DROP TRIGGER IF EXISTS trigger_delete_share_storage ON public.shares;
-
-CREATE TRIGGER trigger_delete_share_storage
-AFTER DELETE ON public.shares
-FOR EACH ROW
-EXECUTE FUNCTION public.handle_deleted_share_storage();
+-- 4. Enable Supabase Realtime Broadcasts on shares table
+ALTER PUBLICATION supabase_realtime ADD TABLE public.shares;

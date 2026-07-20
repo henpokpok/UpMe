@@ -178,44 +178,40 @@ export function subscribeToRealtimeUploads(onNewUpload) {
 }
 
 /**
- * Retrieve active Share by Passcode
- */
-export async function getShareByCode(code) {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    throw new Error('กรุณาตั้งค่า Supabase URL และ Anon Key ก่อนนะจ๊ะ');
-  }
-
-  const cleanCode = code.trim();
-  const { data, error } = await supabase
-    .from('shares')
-    .select('*')
-    .eq('code', cleanCode)
-    .gt('expires_at', new Date().toISOString())
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`เกิดข้อผิดพลาด: ${error.message}`);
-  }
-
-  return data;
-}
-
-/**
  * Delete a share record and storage file manually
+ * Deletes DB row first to ensure UI updates, then cleans up storage object.
  */
 export async function deleteShareRecordAndStorage(id, storagePath) {
-  try {
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
 
-    if (storagePath) {
-      await supabase.storage.from('user-shares').remove([storagePath]);
+  try {
+    // 1. Delete DB record
+    const { error: dbError } = await supabase
+      .from('shares')
+      .delete()
+      .eq('id', id);
+
+    if (dbError) {
+      console.error('Error deleting share from DB:', dbError);
+      return false;
     }
 
-    await supabase.from('shares').delete().eq('id', id);
+    // 2. Remove file from storage if present (non-blocking)
+    if (storagePath) {
+      supabase.storage
+        .from('user-shares')
+        .remove([storagePath])
+        .then(({ error: stErr }) => {
+          if (stErr) console.warn('Storage file cleanup warning:', stErr);
+        })
+        .catch(err => console.warn('Storage cleanup exception:', err));
+    }
+
+    return true;
   } catch (err) {
-    console.error('Error deleting share:', err);
+    console.error('Exception in deleteShareRecordAndStorage:', err);
+    return false;
   }
 }
 
