@@ -117,9 +117,24 @@ function formatBytes(bytes, decimals = 1) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+function formatRemainingTime(expiresAtISO) {
+  const diffMs = new Date(expiresAtISO) - new Date();
+  if (diffMs <= 0) return 'หมดอายุแล้ว';
+  const totalMins = Math.floor(diffMs / (1000 * 60));
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  if (hours >= 24) {
+    const days = Math.floor(hours / 24);
+    return `เหลือ ${days} วัน`;
+  }
+  if (hours > 0) {
+    return `เหลือ ${hours} ชม. ${mins} นาที`;
+  }
+  return `เหลือ ${mins} นาที`;
+}
+
 // --- Chat Bubble Popover (History + Notifications Toggle) ---
 function initHistoryPopover() {
-  // Sync notification toggle switch state
   if ('Notification' in window && Notification.permission === 'granted') {
     popoverNotifyToggle.checked = true;
   }
@@ -144,7 +159,6 @@ function initHistoryPopover() {
     }
   });
 
-  // Toggle Chat Bubble Popover
   historyBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const isHidden = historyPopover.classList.contains('hidden');
@@ -197,19 +211,23 @@ async function openHistoryPopover() {
         <span class="history-status-badge ${isAccessed ? 'badge-accessed' : 'badge-active'}">
           ${isAccessed ? '🟢 โหลดแล้ว' : '⚪ รอการโหลด'}
         </span>
-        <button class="icon-btn-danger-outline delete-history-btn" style="padding: 2px 6px; font-size: 0.7rem;">
+        <button type="button" class="icon-btn-danger-outline delete-history-btn" style="padding: 2px 6px; font-size: 0.7rem;">
           🗑️
         </button>
       </div>
     `;
 
-    rowEl.querySelector('.delete-history-btn').addEventListener('click', async (e) => {
+    // History Item Delete Button Handler Fix
+    const deleteBtn = rowEl.querySelector('.delete-history-btn');
+    deleteBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
       e.stopPropagation();
+
       if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
         await deleteShareRecordAndStorage(item.id, item.storage_path);
         showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
-        await openHistoryPopover();
         await refreshAppFeed();
+        await openHistoryPopover();
       }
     });
 
@@ -424,7 +442,7 @@ async function refreshAppFeed() {
   }
 }
 
-// --- Render Floating Items in Cloud ---
+// --- Render Floating Items in Cloud (With Image Preview, Expiry & Quick Actions) ---
 function renderCloudItemBubbles(sharesList) {
   liveFeedContainer.innerHTML = '';
 
@@ -436,23 +454,81 @@ function renderCloudItemBubbles(sharesList) {
     const isFile = item.type === 'file' || item.type === 'both';
     const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
-    let icon = '📝';
-    if (isImage) icon = '🖼️';
-    else if (isFile) icon = '📁';
-    else if (isUrl) icon = '🔗';
+    let visualContent = '';
+
+    if (isImage && item.content) {
+      // Render actual image preview thumbnail inside the cloud bubble
+      visualContent = `<img src="${item.content}" alt="preview" class="cloud-item-img-preview" />`;
+    } else {
+      let icon = '📝';
+      if (isFile) icon = '📁';
+      else if (isUrl) icon = '🔗';
+      visualContent = `<span class="cloud-item-icon">${icon}</span>`;
+    }
 
     let displayTitle = item.file_name || item.content || 'Item';
-    const expiryTime = new Date(item.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const remainingTimeStr = formatRemainingTime(item.expires_at);
 
     cardEl.innerHTML = `
-      <span class="cloud-item-icon">${icon}</span>
+      ${visualContent}
       <span class="cloud-item-title">${escapeHtml(displayTitle)}</span>
-      <span class="cloud-item-meta">${expiryTime}</span>
+      <span class="cloud-item-meta">${remainingTimeStr}</span>
+      <div class="cloud-card-actions">
+        ${isFile ? `
+          <a href="${item.content}" download="${escapeHtml(item.file_name || 'download')}" class="cloud-act-btn quick-save-btn" title="Quick Save">
+            💾
+          </a>
+        ` : `
+          <button type="button" class="cloud-act-btn quick-copy-btn" title="Copy">
+            📋
+          </button>
+        `}
+        <button type="button" class="cloud-act-btn-danger quick-delete-btn" title="Delete">
+          🗑️
+        </button>
+      </div>
     `;
 
-    cardEl.addEventListener('click', () => {
-      openItemPreviewModal(item);
+    // Click card body (except action buttons) opens Preview Modal
+    cardEl.addEventListener('click', (e) => {
+      if (!e.target.closest('.cloud-card-actions')) {
+        openItemPreviewModal(item);
+      }
     });
+
+    // Quick Copy button for text items
+    const quickCopyBtn = cardEl.querySelector('.quick-copy-btn');
+    if (quickCopyBtn) {
+      quickCopyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        markItemAsAccessed(item.id);
+        navigator.clipboard.writeText(item.content).then(() => {
+          showToast('📋 Copied to clipboard!');
+        });
+      });
+    }
+
+    // Quick Save button for file items
+    const quickSaveBtn = cardEl.querySelector('.quick-save-btn');
+    if (quickSaveBtn) {
+      quickSaveBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        markItemAsAccessed(item.id);
+      });
+    }
+
+    // Quick Delete button
+    const quickDeleteBtn = cardEl.querySelector('.quick-delete-btn');
+    if (quickDeleteBtn) {
+      quickDeleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+          await deleteShareRecordAndStorage(item.id, item.storage_path);
+          showToast('🗑️ Deleted!');
+          await refreshAppFeed();
+        }
+      });
+    }
 
     liveFeedContainer.appendChild(cardEl);
   });

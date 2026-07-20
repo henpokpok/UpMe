@@ -162,7 +162,7 @@ body {
   transform: scale(1.1);
 }
 
-/* 💬 CHAT BUBBLE POPOVER (POINTER TO BUTTON) */
+/* 💬 CHAT BUBBLE POPOVER */
 .chat-bubble-popover {
   position: absolute;
   top: 68px;
@@ -225,7 +225,6 @@ body {
   color: var(--text-dark);
 }
 
-/* Small Switch Slider */
 .toggle-switch.sm {
   width: 34px;
   height: 18px;
@@ -310,7 +309,7 @@ input:checked + .slider.sm:before {
   gap: 16px;
 }
 
-/* ☁️ CLOUD FEED CONTAINER (TOP POSITION) */
+/* ☁️ CLOUD FEED CONTAINER */
 .cloud-feed-card {
   position: relative;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(253, 242, 248, 0.9) 100%);
@@ -354,7 +353,7 @@ input:checked + .slider.sm:before {
 
 .cloud-items-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
   gap: 12px;
   min-height: 100px;
 }
@@ -363,21 +362,22 @@ input:checked + .slider.sm:before {
   background: #ffffff;
   border: 2px solid #fbcfe8;
   border-radius: 18px;
-  padding: 14px 12px;
+  padding: 12px 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 8px;
   text-align: center;
   cursor: pointer;
   box-shadow: 0 6px 15px rgba(236, 72, 153, 0.08);
   transition: var(--transition-bouncy);
   animation: floatBubble 4s infinite ease-in-out alternate;
+  position: relative;
 }
 
 .cloud-item-card:hover {
-  transform: translateY(-6px) scale(1.04);
+  transform: translateY(-6px) scale(1.03);
   border-color: #f472b6;
   box-shadow: 0 12px 25px rgba(236, 72, 153, 0.18);
 }
@@ -387,10 +387,19 @@ input:checked + .slider.sm:before {
   100% { transform: translateY(-4px); }
 }
 
+/* Image Thumbnail Preview in Cloud */
+.cloud-item-img-preview {
+  width: 100%;
+  height: 85px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1.5px solid #fbcfe8;
+}
+
 .cloud-item-icon { font-size: 1.8rem; }
 
 .cloud-item-title {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-dark);
   word-break: break-all;
@@ -401,7 +410,60 @@ input:checked + .slider.sm:before {
   overflow: hidden;
 }
 
-.cloud-item-meta { font-size: 0.68rem; color: var(--text-muted); }
+.cloud-item-meta {
+  font-size: 0.68rem;
+  color: #ec4899;
+  font-weight: 600;
+  background: #fce7f3;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.cloud-card-actions {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.cloud-act-btn {
+  background: #f3e8ff;
+  border: 1px solid #e9d5ff;
+  color: #7e22ce;
+  padding: 4px 8px;
+  border-radius: 14px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cloud-act-btn:hover {
+  background: #c084fc;
+  color: #ffffff;
+}
+
+.cloud-act-btn-danger {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  color: var(--danger-color);
+  padding: 4px 8px;
+  border-radius: 14px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.cloud-act-btn-danger:hover {
+  background: #f43f5e;
+  color: #ffffff;
+}
 
 /* Upload Section Card */
 .page-card {
