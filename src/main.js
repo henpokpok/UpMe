@@ -535,8 +535,13 @@ function renderCloudItemBubbles(sharesList) {
       <!-- Right Info Area -->
       <div class="cloud-item-right-info">
         <span class="cloud-item-title-text">${escapeHtml(titleStr)}</span>
-        <span class="cloud-item-upload-time">${shortUploadTime}</span>
-        <span class="cloud-item-remaining-pink">${remainingTimePinkStr}</span>
+        
+        <!-- Single Combined Meta Line: Upload Time | Remaining Time -->
+        <div class="cloud-item-meta-line">
+          <span class="cloud-item-upload-time">${shortUploadTime}</span>
+          <span class="meta-divider">|</span>
+          <span class="cloud-item-remaining-pink">${remainingTimePinkStr}</span>
+        </div>
         
         <!-- Bottom-Right Small Circular SVG Action Buttons -->
         <div class="cloud-item-bottom-actions">
