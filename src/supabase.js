@@ -186,7 +186,7 @@ export async function deleteShareRecordAndStorage(id, storagePath) {
   if (!supabase) return { success: false, error: 'Supabase client not configured' };
 
   try {
-    // 1. Delete DB record
+    // 1. Delete DB record from shares table
     const { error: dbError } = await supabase
       .from('shares')
       .delete()
@@ -197,15 +197,12 @@ export async function deleteShareRecordAndStorage(id, storagePath) {
       return { success: false, error: dbError.message };
     }
 
-    // 2. Remove file from storage if present (non-blocking)
+    // 2. Storage file cleanup via Storage API (fire & forget, non-blocking)
     if (storagePath) {
       supabase.storage
         .from('user-shares')
         .remove([storagePath])
-        .then(({ error: stErr }) => {
-          if (stErr) console.warn('Storage file cleanup warning:', stErr);
-        })
-        .catch(err => console.warn('Storage cleanup exception:', err));
+        .catch(stErr => console.warn('Non-critical storage cleanup warning:', stErr));
     }
 
     return { success: true };
