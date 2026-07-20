@@ -8,10 +8,20 @@ const VAPID_SUBJECT = "mailto:admin@upmee.app";
 
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
 serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   try {
     const payload = await req.json();
-    const newRecord = payload.record;
+    console.log("Webhook payload received:", payload);
+    const newRecord = payload.record || payload;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -20,8 +30,14 @@ serve(async (req) => {
     // Fetch active device push subscriptions from database
     const { data: subs, error } = await supabase.from("push_subscriptions").select("*");
     if (error || !subs || subs.length === 0) {
-      return new Response(JSON.stringify({ message: "No active push subscriptions found" }), { status: 200 });
+      console.log("No subscriptions found in DB");
+      return new Response(JSON.stringify({ message: "No active push subscriptions found" }), { 
+        status: 200, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      });
     }
+
+    console.log(`Sending Web Push to ${subs.length} devices...`);
 
     const pushPayload = JSON.stringify({
       title: "UpMee 🐰 มีไฟล์/ข้อความใหม่!",
@@ -30,16 +46,22 @@ serve(async (req) => {
       url: "/"
     });
 
-    // Send native Web Push Notification to all devices via Apple APNs & Google FCM
     const sendPromises = subs.map((sub) =>
       webpush.sendNotification(sub.subscription, pushPayload).catch((err) => {
-        console.warn("Push delivery result:", err);
+        console.warn("Push delivery error for sub:", err);
       })
     );
 
     await Promise.all(sendPromises);
-    return new Response(JSON.stringify({ success: true, count: subs.length }), { status: 200 });
+    return new Response(JSON.stringify({ success: true, count: subs.length }), { 
+      status: 200, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    console.error("Edge Function error:", err);
+    return new Response(JSON.stringify({ error: err.message }), { 
+      status: 500, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+    });
   }
 });
