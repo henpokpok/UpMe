@@ -4,7 +4,6 @@ import {
   saveSupabaseConfig,
   createShareItem,
   getActiveSharesList,
-  getShareByCode,
   deleteShareRecordAndStorage,
   getStorageUsageInfo
 } from './supabase.js';
@@ -33,13 +32,6 @@ const storageProgressFill = document.getElementById('storage-progress-fill');
 const liveFeedContainer = document.getElementById('live-feed-container');
 const refreshFeedBtn = document.getElementById('refresh-feed-btn');
 
-const receiveForm = document.getElementById('receive-form');
-const receiveCodeInput = document.getElementById('receive-code-input');
-const retrieveBtn = document.getElementById('retrieve-btn');
-const receiveOutput = document.getElementById('receive-output');
-const receiveError = document.getElementById('receive-error');
-const errorMessage = document.getElementById('error-message');
-
 const settingsBtn = document.getElementById('settings-btn');
 const configModal = document.getElementById('config-modal');
 const closeModalBtn = document.getElementById('close-modal-btn');
@@ -50,7 +42,6 @@ const cfgKey = document.getElementById('cfg-key');
 const qrModal = document.getElementById('qr-modal');
 const closeQrModalBtn = document.getElementById('close-qr-modal-btn');
 const qrModalCanvas = document.getElementById('qr-modal-canvas');
-const qrModalPasscode = document.getElementById('qr-modal-passcode');
 
 const pwaInstallBtn = document.getElementById('pwa-install-btn');
 const toast = document.getElementById('toast');
@@ -66,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Load storage quota info and live feed items
   refreshAppFeed();
-  checkUrlQueryParams();
 });
 
 // --- Toast Helper ---
@@ -184,7 +174,7 @@ function initForms() {
       submitShareBtn.disabled = true;
       submitShareBtn.innerHTML = `<span>⏳ กำลังอัปโหลด...</span>`;
 
-      const result = await createShareItem({
+      await createShareItem({
         textContent: textVal,
         file: selectedFile,
         durationKey: selectedDurationKey
@@ -213,15 +203,6 @@ function initForms() {
   refreshFeedBtn.addEventListener('click', () => {
     refreshAppFeed();
     showToast('🔄 รีเฟรชรายการเรียบร้อยแล้ว');
-  });
-
-  // Receiver Form Submit
-  receiveForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const code = receiveCodeInput.value.trim();
-    if (!code) return;
-
-    await executeRetrieval(code);
   });
 }
 
@@ -321,7 +302,6 @@ function renderLiveFeedCards(sharesList) {
       <div class="feed-card-header">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span class="feed-card-type-badge">${item.type === 'both' ? '📝+📁 ข้อความและไฟล์' : item.type === 'file' ? '📁 ไฟล์แนบ' : '📝 ข้อความ/ลิงก์'}</span>
-          <span class="passcode-pill">Code: ${item.code}</span>
         </div>
         <span class="feed-card-expiry">หมดอายุ: ${formattedExpiry}</span>
       </div>
@@ -345,7 +325,7 @@ function renderLiveFeedCards(sharesList) {
           </a>
         ` : ''}
 
-        <button class="secondary-btn open-qr-btn" data-code="${item.code}">📱 QR Code</button>
+        <button class="secondary-btn open-qr-btn" data-url="${escapeHtml(item.content || window.location.href)}">📱 QR Code</button>
 
         <button class="icon-btn-danger-outline delete-item-btn" style="margin-left: auto;">
           🗑️ ลบรายการ
@@ -353,7 +333,7 @@ function renderLiveFeedCards(sharesList) {
       </div>
     `;
 
-    // Event Handlers for Card Buttons
+    // Event Handlers
     const copyBtn = cardEl.querySelector('.copy-text-btn');
     if (copyBtn) {
       copyBtn.addEventListener('click', () => {
@@ -366,7 +346,8 @@ function renderLiveFeedCards(sharesList) {
     const qrBtn = cardEl.querySelector('.open-qr-btn');
     if (qrBtn) {
       qrBtn.addEventListener('click', () => {
-        openQrModal(item.code);
+        const urlToEncode = isFile ? item.content : (isUrl ? item.content : window.location.href);
+        openQrModal(urlToEncode);
       });
     }
 
@@ -385,80 +366,11 @@ function renderLiveFeedCards(sharesList) {
   });
 }
 
-// --- Receiver Passcode Retrieval (Fallback) ---
-async function executeRetrieval(code) {
-  receiveError.classList.add('hidden');
-  receiveOutput.classList.add('hidden');
-  receiveOutput.innerHTML = '';
-
-  const { url, key } = getSupabaseConfig();
-  if (!url || !key) {
-    openSettingsModal();
-    showToast('⚠️ กรุณาตั้งค่า Supabase ก่อนดึงข้อมูลนะจ๊ะ');
-    return;
-  }
-
-  try {
-    retrieveBtn.disabled = true;
-    retrieveBtn.querySelector('span').textContent = '⏳ กำลังค้นหา...';
-
-    const shareItem = await getShareByCode(code);
-
-    if (!shareItem) {
-      errorMessage.textContent = 'รหัสผ่านไม่ถูกต้อง หรือรายการนี้หมดอายุไปแล้วจ้า 😿';
-      receiveError.classList.remove('hidden');
-      return;
-    }
-
-    renderShareOutput(shareItem);
-  } catch (err) {
-    errorMessage.textContent = err.message || 'รหัสผ่านไม่ถูกต้อง หรือหมดอายุแล้วจ้า 😿';
-    receiveError.classList.remove('hidden');
-  } finally {
-    retrieveBtn.disabled = false;
-    retrieveBtn.querySelector('span').textContent = '🐰 รับข้อมูล';
-  }
-}
-
-function renderShareOutput(item) {
-  receiveOutput.classList.remove('hidden');
-
-  const formattedExpiry = new Date(item.expires_at).toLocaleString('th-TH');
-  const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
-  const isFile = item.type === 'file' || item.type === 'both';
-
-  receiveOutput.innerHTML = `
-    <div class="output-card">
-      <div class="output-header">
-        <span class="output-type-tag">ผลการค้นหารหัส: ${item.code}</span>
-        <span class="output-expiry-tag">หมดอายุ: ${formattedExpiry}</span>
-      </div>
-      ${item.content ? `<div class="output-text-content">${escapeHtml(item.content)}</div>` : ''}
-      ${isFile ? `
-        <a href="${item.content}" download="${escapeHtml(item.file_name || 'file')}" target="_blank" class="primary-btn" style="text-decoration: none; text-align: center;">
-          🌸 ดาวน์โหลดไฟล์
-        </a>
-      ` : ''}
-    </div>
-  `;
-}
-
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/[&<>'"]/g, 
     tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
   );
-}
-
-// --- Check URL Query Params (e.g. ?code=123456) ---
-function checkUrlQueryParams() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const codeParam = urlParams.get('code');
-  if (codeParam) {
-    receiveCodeInput.value = codeParam;
-    receiveForm.scrollIntoView({ behavior: 'smooth' });
-    executeRetrieval(codeParam);
-  }
 }
 
 // --- QR Modal Handlers ---
@@ -469,11 +381,8 @@ function initQrModal() {
   });
 }
 
-function openQrModal(code) {
-  const shareUrl = `${window.location.origin}${window.location.pathname}?code=${code}`;
-  qrModalPasscode.textContent = code;
-
-  QRCode.toCanvas(qrModalCanvas, shareUrl, {
+function openQrModal(urlToEncode) {
+  QRCode.toCanvas(qrModalCanvas, urlToEncode, {
     width: 160,
     margin: 1,
     color: {
@@ -494,10 +403,10 @@ function closeQrModal() {
 // --- Settings Modal Handlers ---
 function initSettingsModal() {
   settingsBtn.addEventListener('click', openSettingsModal);
-  closeModalBtn.addEventListener('click', closeSettingsModal);
+  closeModalBtn.addEventListener('click', closeModalBtnHandler);
 
   configModal.addEventListener('click', (e) => {
-    if (e.target === configModal) closeSettingsModal();
+    if (e.target === configModal) closeModalBtnHandler();
   });
 
   saveConfigBtn.addEventListener('click', () => {
@@ -509,7 +418,7 @@ function initSettingsModal() {
     }
     saveSupabaseConfig(url, key);
     showToast('💖 บันทึกการตั้งค่า Supabase เรียบร้อยแล้ว!');
-    closeSettingsModal();
+    closeModalBtnHandler();
     refreshAppFeed();
   });
 }
@@ -521,7 +430,7 @@ function openSettingsModal() {
   configModal.classList.remove('hidden');
 }
 
-function closeSettingsModal() {
+function closeModalBtnHandler() {
   configModal.classList.add('hidden');
 }
 

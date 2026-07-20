@@ -139,7 +139,7 @@
             <span>🔄 รีเฟรช</span>
           </button>
         </div>
-        <p class="section-desc">ดูข้อความและดาวน์โหลดไฟล์ที่คุณฝากไว้ข้ามอุปกรณ์ได้ทันที โดยไม่ต้องกรอกรหัสผ่าน!</p>
+        <p class="section-desc">ดูข้อความและดาวน์โหลดไฟล์ที่คุณฝากไว้ข้ามอุปกรณ์ได้ทันที!</p>
 
         <!-- Dynamic Feed List Container -->
         <div id="live-feed-container" class="live-feed-list">
@@ -147,35 +147,6 @@
             <span class="loading-emoji">⏳</span>
             <p>กำลังโหลดรายการล่าสุดของคุณ...</p>
           </div>
-        </div>
-      </section>
-
-      <!-- ==========================================
-           SECTION 3: 🔑 ค้นหาด้วยรหัสผ่าน 6 หลัก (FALLBACK)
-           ========================================== -->
-      <section class="page-card search-fallback-card">
-        <div class="card-title-group">
-          <span class="section-emoji">🔑</span>
-          <h2>ดึงข้อมูลด้วยรหัส 6 หลัก หรือ QR Code</h2>
-        </div>
-        <p class="section-desc">ใช้กรณีสแกน QR Code หรือป้อนรหัสจากอุปกรณ์อื่น</p>
-
-        <form id="receive-form" class="passcode-input-form">
-          <div class="passcode-input-wrapper">
-            <input type="text" id="receive-code-input" placeholder="เช่น 123456" maxlength="8" autocomplete="off" />
-            <button type="submit" id="retrieve-btn" class="primary-btn search-btn">
-              <span>🐰 รับข้อมูล</span>
-            </button>
-          </div>
-        </form>
-
-        <!-- Retrieval Output Container -->
-        <div id="receive-output" class="receive-output-container hidden"></div>
-
-        <!-- Error Alert -->
-        <div id="receive-error" class="error-alert hidden">
-          <span>😿</span>
-          <span id="error-message">รหัสไม่ถูกต้อง หรือรายการหมดอายุไปแล้วจ้า</span>
         </div>
       </section>
 
@@ -209,15 +180,11 @@
     <div id="qr-modal" class="modal-backdrop hidden">
       <div class="modal-card qr-modal-card">
         <div class="modal-header">
-          <h3>📱 QR Code สำหรับเปิดบนมือถือ/iPad</h3>
+          <h3>📱 QR Code สำหรับสแกนบนมือถือ/iPad</h3>
           <button id="close-qr-modal-btn" class="close-btn">&times;</button>
         </div>
         <div class="qr-modal-body">
           <canvas id="qr-modal-canvas"></canvas>
-          <div class="passcode-box">
-            <span class="passcode-label">รหัสผ่าน 6 หลักคือ</span>
-            <span id="qr-modal-passcode" class="passcode-highlight">123456</span>
-          </div>
         </div>
       </div>
     </div>
