@@ -49,16 +49,24 @@ function calculateExpirationISO(durationKey) {
 export async function savePushSubscription(subscription) {
   try {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) return { success: false, error: 'Supabase client not configured' };
 
-    await supabase.from('push_subscriptions').insert([
+    const { error } = await supabase.from('push_subscriptions').insert([
       {
         subscription: subscription,
         user_agent: navigator.userAgent
       }
     ]);
+
+    if (error) {
+      console.error('Error inserting push subscription to DB:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
   } catch (err) {
     console.warn('Error saving push subscription:', err);
+    return { success: false, error: err.message };
   }
 }
 

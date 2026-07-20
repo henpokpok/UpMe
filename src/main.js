@@ -158,7 +158,7 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// Register background Web Push PushManager subscription with valid VAPID Public Key
+// Register background Web Push PushManager subscription with fresh VAPID Key
 async function registerWebPushSubscription() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
@@ -166,22 +166,35 @@ async function registerWebPushSubscription() {
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
 
-    if (!sub) {
-      // Mathematically valid NIST P-256 VAPID Public Key
-      const publicVapidKey = 'BCKyt1Zaqd4A2WUFCxedHrZCQXSTlOP2EJo9dYTuaOzzJ0suZmAPZkCLEUkggxsQXuDShNwxo2SQzuHQMyfBTjs';
-      const convertedKey = urlBase64ToUint8Array(publicVapidKey);
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: convertedKey
-      });
+    // Always clear old stale subscriptions to force a clean new Push Token with the new VAPID Key
+    if (sub) {
+      try {
+        await sub.unsubscribe();
+      } catch (unsubErr) {
+        console.warn('Unsubscribe note:', unsubErr);
+      }
     }
 
+    // Mathematically valid NIST P-256 VAPID Public Key
+    const publicVapidKey = 'BCKyt1Zaqd4A2WUFCxedHrZCQXSTlOP2EJo9dYTuaOzzJ0suZmAPZkCLEUkggxsQXuDShNwxo2SQzuHQMyfBTjs';
+    const convertedKey = urlBase64ToUint8Array(publicVapidKey);
+
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: convertedKey
+    });
+
     if (sub) {
-      await savePushSubscription(sub.toJSON());
-      console.log('Background Push Subscription successfully registered and saved!');
+      const res = await savePushSubscription(sub.toJSON());
+      if (res && res.success) {
+        showToast('🔔 ลงทะเบียนการแจ้งเตือนเตือนยิงข้ามอุปกรณ์สำเร็จ!');
+      } else {
+        showToast(`⚠️ บันทึก Push Token: ${res?.error || 'RLS Check'}`);
+      }
     }
   } catch (err) {
     console.warn('Web Push Manager note:', err);
+    showToast(`⚠️ Push Register: ${err.message || 'Check Browser Settings'}`);
   }
 }
 
