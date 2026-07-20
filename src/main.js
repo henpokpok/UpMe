@@ -256,28 +256,41 @@ function closeHistoryPopover() {
   historyPopover.classList.add('hidden');
 }
 
+// --- Trigger Cross-Platform System Notification ---
+function triggerSystemNotification(newRecord) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+
+  const title = 'UpMee 🐰 มีไฟล์/ข้อความใหม่!';
+  const bodyText = newRecord.file_name 
+    ? `อัปโหลดไฟล์ใหม่: ${newRecord.file_name}`
+    : `ข้อความใหม่: ${newRecord.content ? newRecord.content.substring(0, 40) : ''}`;
+
+  const options = {
+    body: bodyText,
+    icon: '/bunny_mascot.png',
+    badge: '/icon-192.png',
+    vibrate: [200, 100, 200],
+    data: newRecord
+  };
+
+  // Service Worker showNotification is most reliable on mobile Android Chrome & iOS Safari PWA
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification(title, options);
+    }).catch(() => {
+      new Notification(title, options);
+    });
+  } else {
+    new Notification(title, options);
+  }
+}
+
 // --- Realtime WebSocket Listener ---
 function initRealtimeSubscription() {
   subscribeToRealtimeUploads((newRecord) => {
     refreshAppFeed();
-
-    if ('Notification' in window && Notification.permission === 'granted' && popoverNotifyToggle.checked) {
-      const title = 'UpMee 🐰 มีไฟล์/ข้อความใหม่!';
-      const bodyText = newRecord.file_name 
-        ? `อัปโหลดไฟล์ใหม่: ${newRecord.file_name}`
-        : `ข้อความใหม่: ${newRecord.content ? newRecord.content.substring(0, 40) : ''}`;
-
-      const notification = new Notification(title, {
-        body: bodyText,
-        icon: '/bunny_mascot.png',
-        badge: '/icon-192.png'
-      });
-
-      notification.onclick = () => {
-        window.focus();
-        openItemPreviewModal(newRecord);
-      };
-    }
+    triggerSystemNotification(newRecord);
   });
 }
 

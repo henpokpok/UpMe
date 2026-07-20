@@ -1,69 +1,50 @@
-const CACHE_NAME = 'upme-v1.0';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/src/style.css',
-  '/src/main.js',
-  '/src/supabase.js'
-];
+const CACHE_NAME = 'upmee-pwa-v2';
 
-// Install Event
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE).catch(() => {
-        // Continue installing even if caching some optional assets fails
-      });
-    })
-  );
   self.skipWaiting();
 });
 
-// Activate Event
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
-            return caches.delete(cache);
-          }
-        })
-      );
-    })
-  );
-  self.clients.claim();
+  event.waitUntil(self.clients.claim());
 });
 
-// Fetch Event (Network First, fallback to cache for static shell)
-self.addEventListener('fetch', (event) => {
-  // Ignore non-GET requests and Supabase API requests from caching
-  if (event.request.method !== 'GET' || event.request.url.includes('supabase.co')) {
-    return;
+// Service Worker Push Event Handler for Mobile Background Notifications
+self.addEventListener('push', (event) => {
+  let data = { title: 'UpMee 🐰 มีไฟล์/ข้อความใหม่!', body: 'มีไฟล์ใหม่ฝากไว้บน UpMee' };
+  try {
+    if (event.data) {
+      data = event.data.json();
+    }
+  } catch (e) {
+    console.warn('Error parsing push data:', e);
   }
 
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
+  const options = {
+    body: data.body || 'มีไฟล์ใหม่ฝากไว้บน UpMee',
+    icon: '/bunny_mascot.png',
+    badge: '/icon-192.png',
+    vibrate: [200, 100, 200],
+    data: data
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'UpMee 🐰', options)
+  );
+});
+
+// Notification Click Handler on Mobile
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(self.registration.scope) && 'focus' in client) {
+          return client.focus();
         }
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
-        });
-        return response;
-      })
-      .catch(() => {
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          if (event.request.headers.get('accept').includes('text/html')) {
-            return caches.match('/index.html');
-          }
-        });
-      })
+      }
+      if (clients.openWindow) {
+        return clients.openWindow('/');
+      }
+    })
   );
 });
