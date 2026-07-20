@@ -219,23 +219,24 @@ body {
   font-weight: 600;
 }
 
-/* Horizontal Card Items inside Feed */
+/* Horizontal Card Items inside Feed (Strict 76px Thumbnail & Bottom-Right Actions) */
 .cloud-item-row-card {
   position: relative;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   background: #ffffff;
   border: 1px solid var(--card-border);
-  border-radius: 14px;
+  border-radius: 16px;
   overflow: hidden;
   margin-bottom: 10px;
-  padding-right: 12px;
   box-shadow: 0 2px 8px rgba(236, 72, 153, 0.05);
+  min-height: 76px;
 }
 
 .cloud-item-square-thumb {
   width: 76px;
   height: 76px;
+  align-self: stretch;
   flex-shrink: 0;
   background: #fdf2f8;
   display: flex;
@@ -249,6 +250,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 .cloud-thumb-icon {
@@ -257,10 +259,10 @@ body {
 
 .cloud-item-right-info {
   flex: 1;
-  padding: 8px 12px;
+  padding: 10px 14px 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  justify-content: center;
   min-width: 0;
 }
 
@@ -271,7 +273,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 32px;
+  padding-right: 36px;
 }
 
 .cloud-item-meta-line {
@@ -279,6 +281,7 @@ body {
   align-items: center;
   gap: 6px;
   font-size: 0.75rem;
+  margin-top: 2px;
 }
 
 .cloud-item-upload-time {
@@ -296,24 +299,25 @@ body {
 
 .cloud-item-duration-badge {
   position: absolute;
-  top: 8px;
-  right: 10px;
-  font-size: 0.65rem;
+  top: 10px;
+  right: 12px;
+  font-size: 0.68rem;
   font-weight: 700;
   color: var(--text-secondary);
 }
 
 .cloud-item-bottom-actions {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 6px;
 }
 
 .icon-action-btn, .icon-action-btn-danger {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
@@ -422,6 +426,69 @@ body {
   font-size: 0.88rem;
   color: var(--text-secondary);
   font-weight: 500;
+}
+
+/* Selected File Preview Box & Remove X Button Styling */
+.file-preview-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--accent-pink-subtle);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-input);
+  padding: 8px 12px;
+  margin-top: 4px;
+}
+
+.file-preview-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.file-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.file-name-text {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.file-size-text {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.icon-btn-danger, #remove-file-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--danger-red-light);
+  border: 1px solid #fecdd3;
+  color: var(--danger-red);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 700;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.icon-btn-danger:hover, #remove-file-btn:hover {
+  background: var(--danger-red);
+  color: white;
 }
 
 /* Expiration Pills */
