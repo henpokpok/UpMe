@@ -158,7 +158,7 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// Register background Web Push PushManager subscription
+// Register background Web Push PushManager subscription with valid VAPID Public Key
 async function registerWebPushSubscription() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
@@ -167,8 +167,8 @@ async function registerWebPushSubscription() {
     let sub = await reg.pushManager.getSubscription();
 
     if (!sub) {
-      // Free VAPID Public Key for Web Push Protocol
-      const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvU2J6q1vJbWq6t2Wz1t5y9z2z-A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0U1V2W3X4Y5Z6';
+      // Mathematically valid NIST P-256 VAPID Public Key
+      const publicVapidKey = 'BCKyt1Zaqd4A2WUFCxedHrZCQXSTlOP2EJo9dYTuaOzzJ0suZmAPZkCLEUkggxsQXuDShNwxo2SQzuHQMyfBTjs';
       const convertedKey = urlBase64ToUint8Array(publicVapidKey);
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -178,7 +178,7 @@ async function registerWebPushSubscription() {
 
     if (sub) {
       await savePushSubscription(sub.toJSON());
-      console.log('Background Push Subscription saved!');
+      console.log('Background Push Subscription successfully registered and saved!');
     }
   } catch (err) {
     console.warn('Web Push Manager note:', err);
@@ -316,7 +316,6 @@ function triggerSystemNotification(newRecord) {
     data: newRecord
   };
 
-  // Service Worker showNotification is most reliable on mobile Android Chrome & iOS Safari PWA
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.ready.then(reg => {
       reg.showNotification(title, options);
