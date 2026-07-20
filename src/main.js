@@ -39,6 +39,7 @@ let currentActiveItem = null;
 const historyBtn = document.getElementById('history-btn');
 const historyPopover = document.getElementById('history-popover');
 const popoverNotifyToggle = document.getElementById('popover-notify-toggle');
+const forceRegisterPushBtn = document.getElementById('force-register-push-btn');
 const historyListContainer = document.getElementById('history-list-container');
 
 const pillBtns = document.querySelectorAll('.pill-btn');
@@ -211,6 +212,13 @@ function initHistoryPopover() {
   if ('Notification' in window && Notification.permission === 'granted') {
     popoverNotifyToggle.checked = true;
     registerWebPushSubscription();
+  }
+
+  if (forceRegisterPushBtn) {
+    forceRegisterPushBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      registerWebPushSubscription();
+    });
   }
 
   popoverNotifyToggle.addEventListener('change', async () => {
