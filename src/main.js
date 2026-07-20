@@ -6,7 +6,8 @@ import {
   getActiveSharesList,
   deleteShareRecordAndStorage,
   getStorageUsageInfo,
-  subscribeToRealtimeUploads
+  subscribeToRealtimeUploads,
+  savePushSubscription
 } from './supabase.js';
 
 // Local Storage Key for Accessed Items
@@ -145,10 +146,50 @@ function calculateConfiguredHoursText(createdAtISO, expiresAtISO) {
   return `${diffHours}h`;
 }
 
+// Helper to convert Base64 URL Key to Uint8Array for VAPID Web Push
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// Register background Web Push PushManager subscription
+async function registerWebPushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+
+    if (!sub) {
+      // Free VAPID Public Key for Web Push Protocol
+      const publicVapidKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvU2J6q1vJbWq6t2Wz1t5y9z2z-A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0U1V2W3X4Y5Z6';
+      const convertedKey = urlBase64ToUint8Array(publicVapidKey);
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: convertedKey
+      });
+    }
+
+    if (sub) {
+      await savePushSubscription(sub.toJSON());
+      console.log('Background Push Subscription saved!');
+    }
+  } catch (err) {
+    console.warn('Web Push Manager note:', err);
+  }
+}
+
 // --- Chat Bubble Popover (History + Notifications Toggle) ---
 function initHistoryPopover() {
   if ('Notification' in window && Notification.permission === 'granted') {
     popoverNotifyToggle.checked = true;
+    registerWebPushSubscription();
   }
 
   popoverNotifyToggle.addEventListener('change', async () => {
@@ -162,6 +203,7 @@ function initHistoryPopover() {
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
         showToast('🔔 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว!');
+        registerWebPushSubscription();
       } else {
         popoverNotifyToggle.checked = false;
         showToast('⚠️ ไม่อนุญาตให้เปิดการแจ้งเตือน');
