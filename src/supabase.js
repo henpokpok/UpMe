@@ -179,11 +179,11 @@ export function subscribeToRealtimeUploads(onNewUpload) {
 
 /**
  * Delete a share record and storage file manually
- * Deletes DB row first to ensure UI updates, then cleans up storage object.
+ * Returns detailed result object { success: boolean, error: string | null }
  */
 export async function deleteShareRecordAndStorage(id, storagePath) {
   const supabase = getSupabaseClient();
-  if (!supabase) return false;
+  if (!supabase) return { success: false, error: 'Supabase client not configured' };
 
   try {
     // 1. Delete DB record
@@ -194,7 +194,7 @@ export async function deleteShareRecordAndStorage(id, storagePath) {
 
     if (dbError) {
       console.error('Error deleting share from DB:', dbError);
-      return false;
+      return { success: false, error: dbError.message };
     }
 
     // 2. Remove file from storage if present (non-blocking)
@@ -208,10 +208,10 @@ export async function deleteShareRecordAndStorage(id, storagePath) {
         .catch(err => console.warn('Storage cleanup exception:', err));
     }
 
-    return true;
+    return { success: true };
   } catch (err) {
     console.error('Exception in deleteShareRecordAndStorage:', err);
-    return false;
+    return { success: false, error: err.message };
   }
 }
 

@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- Toast Helper ---
-function showToast(msg, duration = 3000) {
+function showToast(msg, duration = 3500) {
   toast.textContent = msg;
   toast.classList.remove('hidden');
   setTimeout(() => {
@@ -235,11 +235,11 @@ async function openHistoryPopover() {
       e.stopPropagation();
 
       if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-        const deleted = await deleteShareRecordAndStorage(item.id, item.storage_path);
-        if (deleted) {
+        const res = await deleteShareRecordAndStorage(item.id, item.storage_path);
+        if (res.success) {
           showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
         } else {
-          showToast('❌ เกิดข้อผิดพลาดในการลบ');
+          showToast(`❌ ลบไม่สำเร็จ: ${res.error || 'RLS Permission'}`);
         }
         await refreshAppFeed();
         if (!historyPopover.classList.contains('hidden')) {
@@ -598,11 +598,11 @@ function renderCloudItemBubbles(sharesList) {
       quickDeleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-          const deleted = await deleteShareRecordAndStorage(item.id, item.storage_path);
-          if (deleted) {
+          const res = await deleteShareRecordAndStorage(item.id, item.storage_path);
+          if (res.success) {
             showToast('🗑️ Deleted!');
           } else {
-            showToast('❌ Delete failed');
+            showToast(`❌ Delete failed: ${res.error || 'RLS Permission'}`);
           }
           await refreshAppFeed();
         }
@@ -642,12 +642,16 @@ function initItemModal() {
     }
   });
 
-  modalDeleteBtn.addEventListener('click', async () => {
+  modalDeleteBtn.addEventListener('click', async (e) => {
     if (currentActiveItem && confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-      await deleteShareRecordAndStorage(currentActiveItem.id, currentActiveItem.storage_path);
-      showToast('🗑️ Deleted!');
-      closeItemModal();
-      await refreshAppFeed();
+      const res = await deleteShareRecordAndStorage(currentActiveItem.id, currentActiveItem.storage_path);
+      if (res.success) {
+        showToast('🗑️ Deleted!');
+        closeItemModal();
+        await refreshAppFeed();
+      } else {
+        showToast(`❌ Delete failed: ${res.error || 'RLS Permission'}`);
+      }
     }
   });
 }
