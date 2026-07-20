@@ -98,6 +98,13 @@ document.addEventListener('DOMContentLoaded', () => {
   
   refreshAppFeed();
   initRealtimeSubscription();
+
+  // Auto-refresh feed whenever tab becomes active/visible
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      refreshAppFeed();
+    }
+  });
 });
 
 // --- Toast Helper ---
@@ -172,7 +179,7 @@ async function registerWebPushSubscription() {
   }
 
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await navigator.serviceWorker.register('/sw.js');
     let sub = await reg.pushManager.getSubscription();
 
     // Always clear old stale subscriptions to force a clean new Push Token with the new VAPID Key

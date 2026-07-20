@@ -7,9 +7,17 @@ const DEFAULT_SUPABASE_URL = 'https://sdsrxmetbtdzhooxqkkh.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_GYM_eBLwWpct8GT6pPuc-g_r_9zEr_1';
 
 export function getSupabaseConfig() {
-  const url = import.meta.env.VITE_SUPABASE_URL || localStorage.getItem(STORAGE_URL_KEY) || DEFAULT_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY || localStorage.getItem(STORAGE_ANON_KEY) || DEFAULT_SUPABASE_ANON_KEY;
-  return { url, key };
+  let url = localStorage.getItem(STORAGE_URL_KEY);
+  let key = localStorage.getItem(STORAGE_ANON_KEY);
+
+  if (!url || !url.startsWith('http')) {
+    url = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  }
+  if (!key || key.length < 10) {
+    key = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+  }
+
+  return { url: url.trim(), key: key.trim() };
 }
 
 export function saveSupabaseConfig(url, key) {
