@@ -44,6 +44,25 @@ function calculateExpirationISO(durationKey) {
 }
 
 /**
+ * Save device push subscription token for background Web Push notifications
+ */
+export async function savePushSubscription(subscription) {
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    await supabase.from('push_subscriptions').insert([
+      {
+        subscription: subscription,
+        user_agent: navigator.userAgent
+      }
+    ]);
+  } catch (err) {
+    console.warn('Error saving push subscription:', err);
+  }
+}
+
+/**
  * Create a new share item (supports text, file, or both text + file)
  */
 export async function createShareItem({ textContent, file, durationKey }) {
