@@ -148,6 +148,18 @@ body {
   transform: scale(1.1);
 }
 
+/* Red Notification Bell Icon */
+#notify-btn {
+  color: #f43f5e !important;
+  background: #ffe4e6 !important;
+  border-color: #fecdd3 !important;
+}
+
+#notify-btn:hover {
+  background: #fecdd3 !important;
+  transform: scale(1.1);
+}
+
 /* Storage Bar */
 .storage-bar-card {
   background: var(--card-bg);

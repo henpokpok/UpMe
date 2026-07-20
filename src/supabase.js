@@ -125,44 +125,56 @@ export async function createShareItem({ textContent, file, durationKey }) {
  * Fetch all active non-expired shares for single-user live feed
  */
 export async function getActiveSharesList() {
-  const supabase = getSupabaseClient();
-  if (!supabase) return [];
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
 
-  const { data, error } = await supabase
-    .from('shares')
-    .select('*')
-    .gt('expires_at', new Date().toISOString())
-    .order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('shares')
+      .select('*')
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching active shares:', error);
+    if (error) {
+      console.error('Error fetching active shares:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Exception in getActiveSharesList:', err);
     return [];
   }
-
-  return data || [];
 }
 
 /**
- * Subscribe to Realtime WebSocket INSERT broadcasts on 'shares' table
+ * Subscribe safely to Realtime WebSocket INSERT broadcasts on 'shares' table
  */
 export function subscribeToRealtimeUploads(onNewUpload) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) return null;
 
-  const channel = supabase
-    .channel('upme-realtime-channel')
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'shares' },
-      (payload) => {
-        if (payload && payload.new) {
-          onNewUpload(payload.new);
+    const channel = supabase
+      .channel('upme-realtime-channel')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'shares' },
+        (payload) => {
+          if (payload && payload.new) {
+            onNewUpload(payload.new);
+          }
         }
-      }
-    )
-    .subscribe();
+      )
+      .subscribe((status) => {
+        console.log('Realtime status:', status);
+      });
 
-  return channel;
+    return channel;
+  } catch (err) {
+    console.warn('Realtime subscription warning:', err);
+    return null;
+  }
 }
 
 /**
@@ -193,22 +205,30 @@ export async function getShareByCode(code) {
  * Delete a share record and storage file manually
  */
 export async function deleteShareRecordAndStorage(id, storagePath) {
-  const supabase = getSupabaseClient();
-  if (!supabase) return;
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
 
-  if (storagePath) {
-    await supabase.storage.from('user-shares').remove([storagePath]);
+    if (storagePath) {
+      await supabase.storage.from('user-shares').remove([storagePath]);
+    }
+
+    await supabase.from('shares').delete().eq('id', id);
+  } catch (err) {
+    console.error('Error deleting share:', err);
   }
-
-  await supabase.from('shares').delete().eq('id', id);
 }
 
 /**
  * Calculate total active storage bytes used out of 1GB free tier limit
  */
 export async function getStorageUsageInfo() {
-  const shares = await getActiveSharesList();
-  const totalBytes = shares.reduce((acc, curr) => acc + (curr.file_size || 0), 0);
-  const activeCount = shares.length;
-  return { totalBytes, activeCount };
+  try {
+    const shares = await getActiveSharesList();
+    const totalBytes = shares.reduce((acc, curr) => acc + (curr.file_size || 0), 0);
+    const activeCount = shares.length;
+    return { totalBytes, activeCount };
+  } catch (err) {
+    return { totalBytes: 0, activeCount: 0 };
+  }
 }
