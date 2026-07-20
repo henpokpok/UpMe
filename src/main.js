@@ -12,6 +12,7 @@ import {
 let selectedFile = null;
 let selectedDurationKey = '24h'; // Default '24h'
 let deferredPwaPrompt = null;
+let currentActiveItem = null;
 
 // DOM Elements
 const pillBtns = document.querySelectorAll('.pill-btn');
@@ -39,6 +40,17 @@ const saveConfigBtn = document.getElementById('save-config-btn');
 const cfgUrl = document.getElementById('cfg-url');
 const cfgKey = document.getElementById('cfg-key');
 
+const itemModal = document.getElementById('item-modal');
+const closeItemModalBtn = document.getElementById('close-item-modal-btn');
+const modalItemBadge = document.getElementById('modal-item-badge');
+const modalPreviewArea = document.getElementById('modal-preview-area');
+const modalTextContent = document.getElementById('modal-text-content');
+const modalCopyBtn = document.getElementById('modal-copy-btn');
+const modalOpenLinkBtn = document.getElementById('modal-open-link-btn');
+const modalDownloadBtn = document.getElementById('modal-download-btn');
+const modalShareBtn = document.getElementById('modal-share-btn');
+const modalDeleteBtn = document.getElementById('modal-delete-btn');
+
 const qrModal = document.getElementById('qr-modal');
 const closeQrModalBtn = document.getElementById('close-qr-modal-btn');
 const qrModalCanvas = document.getElementById('qr-modal-canvas');
@@ -52,10 +64,10 @@ document.addEventListener('DOMContentLoaded', () => {
   initDropzone();
   initForms();
   initSettingsModal();
+  initItemModal();
   initQrModal();
   initPWA();
   
-  // Load storage quota info and live feed items
   refreshAppFeed();
 });
 
@@ -151,9 +163,8 @@ function handleFileSelection(file) {
   filePreview.classList.remove('hidden');
 }
 
-// --- Forms & Upload Submissions ---
+// --- Upload Submissions ---
 function initForms() {
-  // Share Form Submit
   shareForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -172,7 +183,7 @@ function initForms() {
 
     try {
       submitShareBtn.disabled = true;
-      submitShareBtn.innerHTML = `<span>⏳ กำลังอัปโหลด...</span>`;
+      submitShareBtn.innerHTML = `<span>⏳ Uploading...</span>`;
 
       await createShareItem({
         textContent: textVal,
@@ -180,63 +191,59 @@ function initForms() {
         durationKey: selectedDurationKey
       });
 
-      showToast('🎉 อัปโหลดและแชร์รายการเรียบร้อยแล้ว!');
+      showToast('🎉 Upload Complete!');
 
-      // Clear input fields
+      // Clear fields
       textContent.value = '';
       selectedFile = null;
       fileInput.value = '';
       filePreview.classList.add('hidden');
       dropzone.querySelector('.dropzone-content').classList.remove('hidden');
 
-      // Refresh Live Feed & Storage Bar
       await refreshAppFeed();
     } catch (err) {
       showToast(`❌ ${err.message}`);
     } finally {
       submitShareBtn.disabled = false;
-      submitShareBtn.innerHTML = `<span>💖 อัปโหลด & แชร์รายการ</span>`;
+      submitShareBtn.innerHTML = `<span>Upload 🐰</span>`;
     }
   });
 
-  // Manual Feed Refresh Button
   refreshFeedBtn.addEventListener('click', () => {
     refreshAppFeed();
-    showToast('🔄 รีเฟรชรายการเรียบร้อยแล้ว');
+    showToast('🔄 Refreshed');
   });
 }
 
-// --- Refresh App Live Feed & Storage Quota ---
+// --- Refresh Cloud Feed & Storage % Bar ---
 async function refreshAppFeed() {
   const { url, key } = getSupabaseConfig();
   if (!url || !key) {
     liveFeedContainer.innerHTML = `
       <div class="empty-feed-box">
-        <span class="empty-emoji">⚙️</span>
-        <p>กรุณากดไอคอนตั้งค่าด้านบนเพื่อเชื่อมต่อ Supabase ก่อนใช้งานนะจ๊ะ</p>
+        <p>Please configure Supabase credentials in settings ⚙️</p>
       </div>
     `;
     return;
   }
 
-  // 1. Update Storage Usage Bar
+  // 1. Storage Bar % Calculation
   try {
-    const { totalBytes, activeCount } = await getStorageUsageInfo();
+    const { totalBytes } = await getStorageUsageInfo();
     const TOTAL_CAPACITY = 1000 * 1024 * 1024; // 1,000 MB (1 GB)
-    const percentage = Math.min(100, ((totalBytes / TOTAL_CAPACITY) * 100).toFixed(1));
+    const percentage = Math.min(100, ((totalBytes / TOTAL_CAPACITY) * 100)).toFixed(1);
 
-    storageUsageText.textContent = `${formatBytes(totalBytes)} / 1,000 MB (${activeCount} รายการ)`;
+    storageUsageText.textContent = `${percentage}%`;
     storageProgressFill.style.width = `${percentage}%`;
   } catch (err) {
-    console.error('Error updating storage usage:', err);
+    console.error('Error calculating storage percentage:', err);
   }
 
-  // 2. Fetch Active Shares Feed
+  // 2. Render Cloud Feed Floating Items
   try {
     liveFeedContainer.innerHTML = `
       <div class="loading-spinner-box">
-        <span class="loading-emoji">⏳</span>
-        <p>กำลังโหลดรายการล่าสุดของคุณ...</p>
+        <p>Loading...</p>
       </div>
     `;
 
@@ -245,125 +252,142 @@ async function refreshAppFeed() {
     if (!sharesList || sharesList.length === 0) {
       liveFeedContainer.innerHTML = `
         <div class="empty-feed-box">
-          <span class="empty-emoji">🌸</span>
-          <p>ยังไม่มีรายการที่แชร์อยู่ ลองพิมพ์ข้อความหรืออัปโหลดไฟล์ด้านบนได้เลยจ้า!</p>
+          <p>☁️ Cloud is empty. Upload a file or message below!</p>
         </div>
       `;
       return;
     }
 
-    renderLiveFeedCards(sharesList);
+    renderCloudItemBubbles(sharesList);
   } catch (err) {
     liveFeedContainer.innerHTML = `
       <div class="empty-feed-box">
-        <span class="empty-emoji">😿</span>
-        <p>ไม่สามารถโหลดรายการได้: ${err.message}</p>
+        <p>Error loading items: ${err.message}</p>
       </div>
     `;
   }
 }
 
-// --- Render Feed Cards ---
-function renderLiveFeedCards(sharesList) {
+// --- Render Floating Items in Cloud ---
+function renderCloudItemBubbles(sharesList) {
   liveFeedContainer.innerHTML = '';
 
   sharesList.forEach(item => {
     const cardEl = document.createElement('div');
-    cardEl.className = 'feed-card';
+    cardEl.className = 'cloud-item-card';
 
-    const formattedExpiry = new Date(item.expires_at).toLocaleString('th-TH');
-    const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
+    const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
     const isFile = item.type === 'file' || item.type === 'both';
+    const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
-    let cardBodyHtml = '';
-    
-    // Text Content render
-    if (item.content && (item.type === 'text' || item.type === 'both')) {
-      cardBodyHtml += `<div class="feed-card-content">${escapeHtml(item.content)}</div>`;
-    }
+    let icon = '📝';
+    if (isImage) icon = '🖼️';
+    else if (isFile) icon = '📁';
+    else if (isUrl) icon = '🔗';
 
-    // File Content render
-    if (isFile && item.storage_path) {
-      const fileNameStr = item.file_name || 'ไฟล์แนบ';
-      const fileSizeStr = item.file_size ? formatBytes(item.file_size) : '';
+    let displayTitle = item.file_name || item.content || 'Item';
 
-      cardBodyHtml += `
-        <div class="feed-file-box">
-          <span class="feed-file-icon">🎁</span>
-          <div class="feed-file-details">
-            <span class="feed-file-name">${escapeHtml(fileNameStr)}</span>
-            ${fileSizeStr ? `<span class="file-size">${fileSizeStr}</span>` : ''}
-          </div>
-        </div>
-      `;
-    }
+    const expiryTime = new Date(item.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     cardEl.innerHTML = `
-      <div class="feed-card-header">
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span class="feed-card-type-badge">${item.type === 'both' ? '📝+📁 ข้อความและไฟล์' : item.type === 'file' ? '📁 ไฟล์แนบ' : '📝 ข้อความ/ลิงก์'}</span>
-        </div>
-        <span class="feed-card-expiry">หมดอายุ: ${formattedExpiry}</span>
-      </div>
-
-      ${cardBodyHtml}
-
-      <div class="feed-card-actions">
-        ${item.content && !isFile ? `
-          <button class="secondary-btn copy-text-btn">📋 คัดลอกข้อความ</button>
-        ` : ''}
-
-        ${isUrl ? `
-          <a href="${escapeHtml(item.content)}" target="_blank" rel="noopener noreferrer" class="secondary-btn" style="text-decoration: none;">
-            🔗 เปิดลิงก์
-          </a>
-        ` : ''}
-
-        ${isFile ? `
-          <a href="${item.content}" download="${escapeHtml(item.file_name || 'file')}" target="_blank" class="primary-btn" style="text-decoration: none; padding: 6px 16px; font-size: 0.85rem;">
-            🌸 ดาวน์โหลดไฟล์
-          </a>
-        ` : ''}
-
-        <button class="secondary-btn open-qr-btn" data-url="${escapeHtml(item.content || window.location.href)}">📱 QR Code</button>
-
-        <button class="icon-btn-danger-outline delete-item-btn" style="margin-left: auto;">
-          🗑️ ลบรายการ
-        </button>
-      </div>
+      <span class="cloud-item-icon">${icon}</span>
+      <span class="cloud-item-title">${escapeHtml(displayTitle)}</span>
+      <span class="cloud-item-meta">${expiryTime}</span>
     `;
 
-    // Event Handlers
-    const copyBtn = cardEl.querySelector('.copy-text-btn');
-    if (copyBtn) {
-      copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(item.content).then(() => {
-          showToast('📋 คัดลอกข้อความเรียบร้อยแล้วจ้า 🐰✨');
-        });
-      });
-    }
-
-    const qrBtn = cardEl.querySelector('.open-qr-btn');
-    if (qrBtn) {
-      qrBtn.addEventListener('click', () => {
-        const urlToEncode = isFile ? item.content : (isUrl ? item.content : window.location.href);
-        openQrModal(urlToEncode);
-      });
-    }
-
-    const deleteBtn = cardEl.querySelector('.delete-item-btn');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async () => {
-        if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-          await deleteShareRecordAndStorage(item.id, item.storage_path);
-          showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
-          await refreshAppFeed();
-        }
-      });
-    }
+    cardEl.addEventListener('click', () => {
+      openItemPreviewModal(item);
+    });
 
     liveFeedContainer.appendChild(cardEl);
   });
+}
+
+// --- Item Preview Modal Handlers ---
+function initItemModal() {
+  closeItemModalBtn.addEventListener('click', closeItemModal);
+  itemModal.addEventListener('click', (e) => {
+    if (e.target === itemModal) closeItemModal();
+  });
+
+  modalCopyBtn.addEventListener('click', () => {
+    if (currentActiveItem && currentActiveItem.content) {
+      navigator.clipboard.writeText(currentActiveItem.content).then(() => {
+        showToast('📋 Copied to clipboard!');
+      });
+    }
+  });
+
+  modalShareBtn.addEventListener('click', () => {
+    if (currentActiveItem) {
+      const urlToShare = currentActiveItem.content || window.location.href;
+      openQrModal(urlToShare);
+    }
+  });
+
+  modalDeleteBtn.addEventListener('click', async () => {
+    if (currentActiveItem && confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+      await deleteShareRecordAndStorage(currentActiveItem.id, currentActiveItem.storage_path);
+      showToast('🗑️ Deleted!');
+      closeItemModal();
+      await refreshAppFeed();
+    }
+  });
+}
+
+function openItemPreviewModal(item) {
+  currentActiveItem = item;
+
+  modalItemBadge.textContent = item.type === 'both' ? 'Message + File' : item.type === 'file' ? 'File' : 'Message / Link';
+  
+  modalPreviewArea.innerHTML = '';
+  modalTextContent.classList.add('hidden');
+  modalCopyBtn.classList.add('hidden');
+  modalOpenLinkBtn.classList.add('hidden');
+  modalDownloadBtn.classList.add('hidden');
+
+  const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
+  const isFile = item.type === 'file' || item.type === 'both';
+  const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
+
+  // Image Preview Thumbnail
+  if (isImage && item.content) {
+    modalPreviewArea.innerHTML = `<img src="${item.content}" alt="preview" class="modal-img-preview" />`;
+  } else if (isFile) {
+    const fileNameStr = item.file_name || 'File';
+    const fileSizeStr = item.file_size ? formatBytes(item.file_size) : '';
+    modalPreviewArea.innerHTML = `
+      <div style="font-size: 3rem; margin-bottom: 4px;">📁</div>
+      <p style="font-size: 0.95rem; font-weight: 700;">${escapeHtml(fileNameStr)}</p>
+      ${fileSizeStr ? `<p style="font-size: 0.78rem; color: #6b7280;">${fileSizeStr}</p>` : ''}
+    `;
+  }
+
+  // Text Content Display
+  if (item.content && (item.type === 'text' || item.type === 'both')) {
+    modalTextContent.textContent = item.content;
+    modalTextContent.classList.remove('hidden');
+    modalCopyBtn.classList.remove('hidden');
+
+    if (isUrl) {
+      modalOpenLinkBtn.href = item.content;
+      modalOpenLinkBtn.classList.remove('hidden');
+    }
+  }
+
+  // Download Button for files
+  if (isFile && item.content) {
+    modalDownloadBtn.href = item.content;
+    modalDownloadBtn.download = item.file_name || 'download';
+    modalDownloadBtn.classList.remove('hidden');
+  }
+
+  itemModal.classList.remove('hidden');
+}
+
+function closeItemModal() {
+  itemModal.classList.add('hidden');
+  currentActiveItem = null;
 }
 
 function escapeHtml(str) {
@@ -413,11 +437,11 @@ function initSettingsModal() {
     const url = cfgUrl.value.trim();
     const key = cfgKey.value.trim();
     if (!url || !key) {
-      showToast('❌ กรุณากรอกทั้ง URL และ Anon Key นะจ๊ะ');
+      showToast('❌ Please fill in both URL and Anon Key');
       return;
     }
     saveSupabaseConfig(url, key);
-    showToast('💖 บันทึกการตั้งค่า Supabase เรียบร้อยแล้ว!');
+    showToast('💖 Saved!');
     closeModalBtnHandler();
     refreshAppFeed();
   });

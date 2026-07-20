@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>upMe 🐰 — ฝากและรับข้อความ/ไฟล์สุดน่ารัก</title>
+  <title>UpMee</title>
   
   <!-- SEO & Meta -->
-  <meta name="description" content="แอปส่วนตัวฝากข้อความ ลิงก์ และไฟล์ข้ามอุปกรณ์ (Windows, Android, iPadOS) แบบง่ายๆ ไม่ต้องใส่รหัสผ่าน" />
+  <meta name="description" content="UpMee — Instant Share" />
   <meta name="theme-color" content="#fce7f3" />
   
   <!-- PWA -->
@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="upMe Bunny" />
+  <meta name="apple-mobile-web-app-title" content="UpMee" />
   
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -34,20 +34,23 @@
     <!-- Header -->
     <header class="app-header">
       <div class="logo-area">
-        <img src="/bunny_mascot.png" alt="upMe Bunny Mascot" class="bunny-logo-img" />
-        <div class="logo-title-group">
-          <span class="logo-text">up<span class="accent-text">Me</span> 🐰</span>
-          <span class="logo-subtitle">แอปแชร์ไฟล์และข้อความส่วนตัวข้ามอุปกรณ์</span>
-        </div>
+        <img src="/bunny_mascot.png" alt="UpMee Bunny Mascot" class="bunny-logo-img" />
+        <span class="logo-text">UpMee</span>
       </div>
 
       <div class="header-actions">
-        <button id="pwa-install-btn" class="icon-btn hidden" title="ติดตั้งแอปพลิเคชันลงเครื่อง">
-          <span>📲 ติดตั้งแอป</span>
+        <!-- Icon-only Install Button -->
+        <button id="pwa-install-btn" class="icon-btn icon-only hidden" title="Install App">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
         </button>
 
-        <button id="settings-btn" class="icon-btn" title="ตั้งค่า Supabase Project">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <!-- Settings Button -->
+        <button id="settings-btn" class="icon-btn icon-only" title="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
@@ -55,11 +58,11 @@
       </div>
     </header>
 
-    <!-- Mini Storage Quota Bar -->
+    <!-- Storage Bar (% Only) -->
     <div class="storage-bar-card">
       <div class="storage-bar-info">
-        <span class="storage-bar-title">📊 ความจุ Supabase Storage (Free Quota)</span>
-        <span id="storage-usage-text" class="storage-usage-text">0 MB / 1,000 MB (0 รายการ)</span>
+        <span class="storage-bar-title">Storage</span>
+        <span id="storage-usage-text" class="storage-usage-text">0%</span>
       </div>
       <div class="progress-bar-track">
         <div id="storage-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
@@ -70,30 +73,51 @@
     <main class="main-container">
 
       <!-- ==========================================
-           SECTION 1: 🌸 อัปโหลดข้อความ / ลิงก์ / ไฟล์
+           SECTION 1: ☁️ CLOUD FEED (TOP POSITION)
+           ========================================== -->
+      <section class="cloud-feed-card">
+        <!-- Top corner SVG refresh button -->
+        <button id="refresh-feed-btn" class="cloud-refresh-btn" title="Refresh">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+        </button>
+
+        <!-- Cloud Header -->
+        <div class="cloud-header">
+          <span>☁️</span>
+        </div>
+
+        <!-- Floating Items Grid Container inside the Cloud -->
+        <div id="live-feed-container" class="cloud-items-grid">
+          <div class="loading-spinner-box">
+            <p>Loading...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           SECTION 2: UPLOAD MEE
            ========================================== -->
       <section class="page-card">
-        <div class="card-title-group">
-          <span class="section-emoji">🌸</span>
-          <h2>ฝากข้อความ ลิงก์ หรือ ไฟล์</h2>
-        </div>
+        <h2 class="card-title">Upload Mee</h2>
 
         <form id="share-form" class="inner-form">
           <!-- Text Input Area -->
           <div class="form-group">
-            <label for="text-content">พิมพ์ข้อความ ลิงก์ หรือคำอธิบาย 💭</label>
-            <textarea id="text-content" rows="3" placeholder="แปะลิงก์เว็บ ข้อความ รหัส หรือคำอธิบายที่ต้องการฝากไว้ที่นี่..."></textarea>
+            <label for="text-content">Message / Link</label>
+            <textarea id="text-content" rows="3" placeholder="text here"></textarea>
           </div>
 
-          <!-- File Upload Attachment Box -->
+          <!-- File Attachment Box -->
           <div class="form-group">
-            <label>📎 แนบไฟล์ (รูปภาพ, เอกสาร, วิดีโอ ไม่เกิน 50MB)</label>
+            <label>แนบไฟล์ ไม่เกิน 50MB</label>
             <div id="dropzone" class="file-dropzone">
               <input type="file" id="file-input" class="hidden-file-input" />
               <div class="dropzone-content">
-                <span class="dropzone-icon">✨</span>
-                <p class="dropzone-title">คลิกที่นี่เพื่อเลือกไฟล์ หรือ <span class="browse-btn">ลากไฟล์มาวาง</span></p>
-                <p class="dropzone-subtitle">รองรับไฟล์ทุกประเภท (สูงสุด 50MB ต่อไฟล์)</p>
+                <p class="dropzone-title">แนบไฟล์ / ลากมาวาง</p>
               </div>
               <div id="file-preview" class="file-preview hidden">
                 <div class="file-info">
@@ -103,14 +127,14 @@
                     <span id="file-size" class="file-size">2.4 MB</span>
                   </div>
                 </div>
-                <button type="button" id="remove-file-btn" class="icon-btn-danger" title="ลบไฟล์แนบ">&times;</button>
+                <button type="button" id="remove-file-btn" class="icon-btn-danger" title="Remove">&times;</button>
               </div>
             </div>
           </div>
 
-          <!-- Horizontal Expiration Pill Buttons (1, 8, 24, 7 วัน) -->
+          <!-- Horizontal Expiration Pill Buttons -->
           <div class="form-group">
-            <label>⏱️ เลือกระยะเวลาหมดอายุ (ระบบลบให้อัตโนมัติ)</label>
+            <label>ระยะเวลาหมดอายุไฟล์</label>
             <div class="expiry-pills">
               <button type="button" class="pill-btn" data-value="1h">1 ชม.</button>
               <button type="button" class="pill-btn" data-value="8h">8 ชม.</button>
@@ -119,35 +143,11 @@
             </div>
           </div>
 
-          <!-- Main Submit Button -->
+          <!-- Pastel Primary Button -->
           <button type="submit" id="submit-share-btn" class="primary-btn">
-            <span>💖 อัปโหลด & แชร์รายการ</span>
+            <span>Upload 🐰</span>
           </button>
         </form>
-      </section>
-
-      <!-- ==========================================
-           SECTION 2: 📦 รายการล่าสุดของคุณ (LIVE FEED)
-           ========================================== -->
-      <section class="page-card">
-        <div class="card-title-group">
-          <div class="title-with-refresh">
-            <span class="section-emoji">📦</span>
-            <h2>รายการที่กำลังแชร์อยู่ของคุณ</h2>
-          </div>
-          <button id="refresh-feed-btn" class="icon-btn" title="รีเฟรชรายการ">
-            <span>🔄 รีเฟรช</span>
-          </button>
-        </div>
-        <p class="section-desc">ดูข้อความและดาวน์โหลดไฟล์ที่คุณฝากไว้ข้ามอุปกรณ์ได้ทันที!</p>
-
-        <!-- Dynamic Feed List Container -->
-        <div id="live-feed-container" class="live-feed-list">
-          <div class="loading-spinner-box">
-            <span class="loading-emoji">⏳</span>
-            <p>กำลังโหลดรายการล่าสุดของคุณ...</p>
-          </div>
-        </div>
       </section>
 
     </main>
@@ -156,11 +156,10 @@
     <div id="config-modal" class="modal-backdrop hidden">
       <div class="modal-card">
         <div class="modal-header">
-          <h3>⚙️ ตั้งค่า Supabase Project</h3>
+          <h3>Settings</h3>
           <button id="close-modal-btn" class="close-btn">&times;</button>
         </div>
         <div class="modal-body">
-          <p class="modal-desc">ใส่ Supabase URL และ Anon Key ของคุณ ข้อมูลจะถูกบันทึกอย่างปลอดภัยในเบราว์เซอร์ของคุณ</p>
           <div class="form-group">
             <label for="cfg-url">Supabase Project URL</label>
             <input type="text" id="cfg-url" placeholder="https://your-project.supabase.co" />
@@ -171,7 +170,28 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button id="save-config-btn" class="primary-btn">บันทึกการตั้งค่า 💖</button>
+          <button id="save-config-btn" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Item Preview Modal (Triggered on Cloud Card Click) -->
+    <div id="item-modal" class="modal-backdrop hidden">
+      <div class="modal-card item-modal-card">
+        <div class="modal-header">
+          <span id="modal-item-badge" class="item-type-badge">Preview</span>
+          <button id="close-item-modal-btn" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="modal-preview-area" class="modal-preview-box"></div>
+          <div id="modal-text-content" class="modal-text-box hidden"></div>
+        </div>
+        <div class="modal-footer item-actions-footer">
+          <button id="modal-copy-btn" class="secondary-btn hidden">📋 Copy Text</button>
+          <a id="modal-open-link-btn" href="#" target="_blank" rel="noopener noreferrer" class="secondary-btn hidden" style="text-decoration: none;">🔗 Open Link</a>
+          <a id="modal-download-btn" href="#" target="_blank" download class="primary-btn hidden" style="text-decoration: none;">🌸 Download</a>
+          <button id="modal-share-btn" class="secondary-btn">📱 Share / QR</button>
+          <button id="modal-delete-btn" class="icon-btn-danger-outline" style="margin-left: auto;">🗑️ Delete</button>
         </div>
       </div>
     </div>
@@ -180,7 +200,7 @@
     <div id="qr-modal" class="modal-backdrop hidden">
       <div class="modal-card qr-modal-card">
         <div class="modal-header">
-          <h3>📱 QR Code สำหรับสแกนบนมือถือ/iPad</h3>
+          <h3>QR Code</h3>
           <button id="close-qr-modal-btn" class="close-btn">&times;</button>
         </div>
         <div class="qr-modal-body">
@@ -189,7 +209,7 @@
       </div>
     </div>
 
-    <!-- Notification Toast -->
+    <!-- Toast Notification -->
     <div id="toast" class="toast hidden"></div>
   </div>
 
