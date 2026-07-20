@@ -22,7 +22,7 @@
   
   --text-dark: #374151;
   --text-muted: #6b7280;
-  --text-pink: #9d174d;
+  --text-pink: #ec4899;
 
   --danger-color: #f43f5e;
   --success-color: #10b981;
@@ -256,13 +256,8 @@ body {
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
-input:checked + .slider.sm {
-  background-color: #10b981;
-}
-
-input:checked + .slider.sm:before {
-  transform: translateX(16px);
-}
+input:checked + .slider.sm { background-color: #10b981; }
+input:checked + .slider.sm:before { transform: translateX(16px); }
 
 /* Storage Bar */
 .storage-bar-card {
@@ -302,7 +297,7 @@ input:checked + .slider.sm:before {
   transition: width 0.4s ease-out;
 }
 
-/* Main Container & Page Cards */
+/* Main Container */
 .main-container {
   display: flex;
   flex-direction: column;
@@ -315,7 +310,7 @@ input:checked + .slider.sm:before {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(253, 242, 248, 0.9) 100%);
   border: 2px solid #fbcfe8;
   border-radius: var(--border-radius-cloud);
-  padding: 24px 20px 20px 20px;
+  padding: 22px 18px;
   box-shadow: var(--shadow-cloud);
   display: flex;
   flex-direction: column;
@@ -351,96 +346,131 @@ input:checked + .slider.sm:before {
   transform: rotate(180deg) scale(1.1);
 }
 
+/* Horizontal Rectangle Items List inside Cloud */
 .cloud-items-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
-  gap: 12px;
-  min-height: 100px;
-}
-
-.cloud-item-card {
-  background: #ffffff;
-  border: 2px solid #fbcfe8;
-  border-radius: 18px;
-  padding: 12px 10px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  text-align: center;
-  cursor: pointer;
-  box-shadow: 0 6px 15px rgba(236, 72, 153, 0.08);
-  transition: var(--transition-bouncy);
-  animation: floatBubble 4s infinite ease-in-out alternate;
+  gap: 10px;
+  min-height: 80px;
+}
+
+/* Sleek Horizontal Rectangle Card */
+.cloud-item-row-card {
   position: relative;
+  background: #ffffff;
+  border: 2px solid #fbcfe8;
+  border-radius: 20px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 6px 16px rgba(236, 72, 153, 0.06);
+  transition: var(--transition-bouncy);
 }
 
-.cloud-item-card:hover {
-  transform: translateY(-6px) scale(1.03);
+.cloud-item-row-card:hover {
   border-color: #f472b6;
-  box-shadow: 0 12px 25px rgba(236, 72, 153, 0.18);
+  box-shadow: 0 10px 24px rgba(236, 72, 153, 0.15);
+  transform: translateY(-2px);
 }
 
-@keyframes floatBubble {
-  0% { transform: translateY(0); }
-  100% { transform: translateY(-4px); }
-}
-
-/* Image Thumbnail Preview in Cloud */
-.cloud-item-img-preview {
-  width: 100%;
-  height: 85px;
-  object-fit: cover;
-  border-radius: 12px;
+/* Left Square Thumbnail Preview (Clickable to open popup) */
+.cloud-item-square-thumb {
+  width: 68px;
+  height: 68px;
+  flex-shrink: 0;
+  border-radius: 14px;
   border: 1.5px solid #fbcfe8;
-}
-
-.cloud-item-icon { font-size: 1.8rem; }
-
-.cloud-item-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-dark);
-  word-break: break-all;
-  line-height: 1.2;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  background: #fdf2f8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
+  cursor: pointer;
+  transition: var(--transition-bouncy);
 }
 
-.cloud-item-meta {
-  font-size: 0.68rem;
-  color: #ec4899;
+.cloud-item-square-thumb:hover {
+  transform: scale(1.08);
+  border-color: #f472b6;
+}
+
+.cloud-thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cloud-thumb-icon {
+  font-size: 2rem;
+}
+
+/* Right Info Area */
+.cloud-item-right-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  padding-right: 40px; /* space for top-right duration badge */
+}
+
+.cloud-item-title-text {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cloud-item-upload-time {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* Pink Text for Remaining Expiration Time */
+.cloud-item-remaining-pink {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-pink);
+}
+
+/* Top-Right Duration Hours Badge */
+.cloud-item-duration-badge {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  font-size: 0.7rem;
   font-weight: 600;
-  background: #fce7f3;
+  color: #9ca3af;
+  background: #f3f4f6;
   padding: 2px 8px;
   border-radius: 10px;
 }
 
-.cloud-card-actions {
+/* Bottom-Right Action Buttons */
+.cloud-item-bottom-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
-  width: 100%;
-  justify-content: center;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .cloud-act-btn {
   background: #f3e8ff;
   border: 1px solid #e9d5ff;
   color: #7e22ce;
-  padding: 4px 8px;
+  padding: 4px 10px;
   border-radius: 14px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition-fast);
   text-decoration: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .cloud-act-btn:hover {
@@ -452,12 +482,15 @@ input:checked + .slider.sm:before {
   background: #fff1f2;
   border: 1px solid #fecdd3;
   color: var(--danger-color);
-  padding: 4px 8px;
+  padding: 4px 10px;
   border-radius: 14px;
-  font-size: 0.72rem;
+  font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .cloud-act-btn-danger:hover {
@@ -752,7 +785,7 @@ textarea:focus, input:focus {
 
 .modal-img-preview {
   max-width: 100%;
-  max-height: 220px;
+  max-height: 240px;
   border-radius: 14px;
   object-fit: contain;
   border: 1.5px solid #fbcfe8;

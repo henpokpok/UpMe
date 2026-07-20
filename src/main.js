@@ -133,6 +133,12 @@ function formatRemainingTime(expiresAtISO) {
   return `เหลือ ${mins} นาที`;
 }
 
+function calculateConfiguredHoursText(createdAtISO, expiresAtISO) {
+  const diffHours = Math.round((new Date(expiresAtISO) - new Date(createdAtISO)) / (1000 * 60 * 60));
+  if (diffHours >= 168) return '7 วัน';
+  return `${diffHours} ชม.`;
+}
+
 // --- Chat Bubble Popover (History + Notifications Toggle) ---
 function initHistoryPopover() {
   if ('Notification' in window && Notification.permission === 'granted') {
@@ -217,7 +223,6 @@ async function openHistoryPopover() {
       </div>
     `;
 
-    // History Item Delete Button Handler Fix
     const deleteBtn = rowEl.querySelector('.delete-history-btn');
     deleteBtn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -413,7 +418,7 @@ async function refreshAppFeed() {
     console.error('Error calculating storage percentage:', err);
   }
 
-  // 2. Render Cloud Feed Floating Items
+  // 2. Render Cloud Feed Items
   try {
     liveFeedContainer.innerHTML = `
       <div class="loading-spinner-box">
@@ -442,61 +447,85 @@ async function refreshAppFeed() {
   }
 }
 
-// --- Render Floating Items in Cloud (With Image Preview, Expiry & Quick Actions) ---
+// --- Render Horizontal Rectangle Items in Cloud ---
 function renderCloudItemBubbles(sharesList) {
   liveFeedContainer.innerHTML = '';
 
   sharesList.forEach(item => {
     const cardEl = document.createElement('div');
-    cardEl.className = 'cloud-item-card';
+    cardEl.className = 'cloud-item-row-card';
 
     const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
     const isFile = item.type === 'file' || item.type === 'both';
     const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
-    let visualContent = '';
-
+    // 1. Left Square Thumbnail (Clickable to open popup modal)
+    let squareThumbHtml = '';
     if (isImage && item.content) {
-      // Render actual image preview thumbnail inside the cloud bubble
-      visualContent = `<img src="${item.content}" alt="preview" class="cloud-item-img-preview" />`;
+      squareThumbHtml = `
+        <div class="cloud-item-square-thumb" title="Click to view large preview">
+          <img src="${item.content}" alt="preview" class="cloud-thumb-img" />
+        </div>
+      `;
     } else {
       let icon = '📝';
       if (isFile) icon = '📁';
       else if (isUrl) icon = '🔗';
-      visualContent = `<span class="cloud-item-icon">${icon}</span>`;
+      squareThumbHtml = `
+        <div class="cloud-item-square-thumb" title="Click to view details">
+          <span class="cloud-thumb-icon">${icon}</span>
+        </div>
+      `;
     }
 
-    let displayTitle = item.file_name || item.content || 'Item';
-    const remainingTimeStr = formatRemainingTime(item.expires_at);
+    // 2. Right Info & Timestamps
+    const titleStr = item.file_name || item.content || 'Item';
+    const uploadTimeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const remainingTimePinkStr = formatRemainingTime(item.expires_at);
+    const durationBadgeText = calculateConfiguredHoursText(item.created_at, item.expires_at);
 
     cardEl.innerHTML = `
-      ${visualContent}
-      <span class="cloud-item-title">${escapeHtml(displayTitle)}</span>
-      <span class="cloud-item-meta">${remainingTimeStr}</span>
-      <div class="cloud-card-actions">
-        ${isFile ? `
-          <a href="${item.content}" download="${escapeHtml(item.file_name || 'download')}" class="cloud-act-btn quick-save-btn" title="Quick Save">
-            💾
-          </a>
-        ` : `
-          <button type="button" class="cloud-act-btn quick-copy-btn" title="Copy">
-            📋
+      <!-- Top-Right Duration Badge -->
+      <span class="cloud-item-duration-badge">${durationBadgeText}</span>
+
+      <!-- Left Square Thumbnail -->
+      ${squareThumbHtml}
+
+      <!-- Right Info Area -->
+      <div class="cloud-item-right-info">
+        <span class="cloud-item-title-text">${escapeHtml(titleStr)}</span>
+        <span class="cloud-item-upload-time">อัปโหลดเมื่อ: ${uploadTimeStr}</span>
+        <span class="cloud-item-remaining-pink">${remainingTimePinkStr}</span>
+        
+        <!-- Bottom-Right Action Buttons -->
+        <div class="cloud-item-bottom-actions">
+          <button type="button" class="cloud-act-btn-danger quick-delete-btn" title="Delete">
+            🗑️ Delete
           </button>
-        `}
-        <button type="button" class="cloud-act-btn-danger quick-delete-btn" title="Delete">
-          🗑️
-        </button>
+
+          ${isFile ? `
+            <a href="${item.content}" download="${escapeHtml(item.file_name || 'download')}" class="cloud-act-btn quick-save-btn" title="Download">
+              🌸 Download
+            </a>
+          ` : `
+            <button type="button" class="cloud-act-btn quick-copy-btn" title="Copy">
+              📋 Copy
+            </button>
+          `}
+        </div>
       </div>
     `;
 
-    // Click card body (except action buttons) opens Preview Modal
-    cardEl.addEventListener('click', (e) => {
-      if (!e.target.closest('.cloud-card-actions')) {
+    // Click on Left Square Thumbnail -> Opens Large Popup Modal
+    const squareThumbEl = cardEl.querySelector('.cloud-item-square-thumb');
+    if (squareThumbEl) {
+      squareThumbEl.addEventListener('click', (e) => {
+        e.stopPropagation();
         openItemPreviewModal(item);
-      }
-    });
+      });
+    }
 
-    // Quick Copy button for text items
+    // Quick Copy button
     const quickCopyBtn = cardEl.querySelector('.quick-copy-btn');
     if (quickCopyBtn) {
       quickCopyBtn.addEventListener('click', (e) => {
@@ -508,7 +537,7 @@ function renderCloudItemBubbles(sharesList) {
       });
     }
 
-    // Quick Save button for file items
+    // Quick Save button
     const quickSaveBtn = cardEl.querySelector('.quick-save-btn');
     if (quickSaveBtn) {
       quickSaveBtn.addEventListener('click', (e) => {
@@ -588,7 +617,7 @@ function openItemPreviewModal(item) {
   const isFile = item.type === 'file' || item.type === 'both';
   const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
-  // Image Preview Thumbnail
+  // Image Preview Thumbnail inside Modal
   if (isImage && item.content) {
     modalPreviewArea.innerHTML = `<img src="${item.content}" alt="preview" class="modal-img-preview" />`;
   } else if (isFile) {
