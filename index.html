@@ -39,8 +39,8 @@
       </div>
 
       <div class="header-actions">
-        <!-- Upload History Button -->
-        <button id="history-btn" class="icon-btn icon-only" title="Upload History">
+        <!-- History / Chat Bubble Anchor Button -->
+        <button id="history-btn" class="icon-btn icon-only" title="History & Notifications">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"/>
             <polyline points="12 6 12 12 16 14"/>
@@ -65,6 +65,24 @@
         </button>
       </div>
     </header>
+
+    <!-- Chat Bubble Popover pointing to History Button -->
+    <div id="history-popover" class="chat-bubble-popover hidden">
+      <div class="popover-arrow"></div>
+      <div class="popover-header">
+        <span class="popover-title">🕒 History</span>
+        <label class="popover-toggle-label" title="Enable Notifications">
+          <span class="toggle-text-sm">🔔 Notifications</span>
+          <div class="toggle-switch sm">
+            <input type="checkbox" id="popover-notify-toggle" />
+            <span class="slider sm"></span>
+          </div>
+        </label>
+      </div>
+      <div id="history-list-container" class="history-list-container">
+        <div class="loading-spinner-box"><p>Loading history...</p></div>
+      </div>
+    </div>
 
     <!-- Storage Bar (% Only) -->
     <div class="storage-bar-card">
@@ -179,21 +197,6 @@
         </div>
         <div class="modal-footer">
           <button id="save-config-btn" class="primary-btn">Save</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Upload History Modal -->
-    <div id="history-modal" class="modal-backdrop hidden">
-      <div class="modal-card history-modal-card">
-        <div class="modal-header">
-          <h3>🕒 Upload History (ประวัติอัปโหลด)</h3>
-          <button id="close-history-modal-btn" class="close-btn">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div id="history-list-container" class="history-list-container">
-            <div class="loading-spinner-box"><p>Loading history...</p></div>
-          </div>
         </div>
       </div>
     </div>

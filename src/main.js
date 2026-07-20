@@ -5,7 +5,8 @@ import {
   createShareItem,
   getActiveSharesList,
   deleteShareRecordAndStorage,
-  getStorageUsageInfo
+  getStorageUsageInfo,
+  subscribeToRealtimeUploads
 } from './supabase.js';
 
 // Local Storage Key for Accessed Items
@@ -35,8 +36,8 @@ let currentActiveItem = null;
 
 // DOM Elements
 const historyBtn = document.getElementById('history-btn');
-const historyModal = document.getElementById('history-modal');
-const closeHistoryModalBtn = document.getElementById('close-history-modal-btn');
+const historyPopover = document.getElementById('history-popover');
+const popoverNotifyToggle = document.getElementById('popover-notify-toggle');
 const historyListContainer = document.getElementById('history-list-container');
 
 const pillBtns = document.querySelectorAll('.pill-btn');
@@ -84,7 +85,7 @@ const toast = document.getElementById('toast');
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
-  initHistoryModal();
+  initHistoryPopover();
   initPills();
   initDropzone();
   initForms();
@@ -94,6 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initPWA();
   
   refreshAppFeed();
+  initRealtimeSubscription();
 });
 
 // --- Toast Helper ---
@@ -115,17 +117,53 @@ function formatBytes(bytes, decimals = 1) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// --- Upload History Modal Handlers ---
-function initHistoryModal() {
-  historyBtn.addEventListener('click', openHistoryModal);
-  closeHistoryModalBtn.addEventListener('click', closeHistoryModal);
-  historyModal.addEventListener('click', (e) => {
-    if (e.target === historyModal) closeHistoryModal();
+// --- Chat Bubble Popover (History + Notifications Toggle) ---
+function initHistoryPopover() {
+  // Sync notification toggle switch state
+  if ('Notification' in window && Notification.permission === 'granted') {
+    popoverNotifyToggle.checked = true;
+  }
+
+  popoverNotifyToggle.addEventListener('change', async () => {
+    if (!('Notification' in window)) {
+      showToast('❌ เบราว์เซอร์นี้ยังไม่รองรับการแจ้งเตือนนะจ๊ะ');
+      popoverNotifyToggle.checked = false;
+      return;
+    }
+
+    if (popoverNotifyToggle.checked) {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        showToast('🔔 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว!');
+      } else {
+        popoverNotifyToggle.checked = false;
+        showToast('⚠️ ไม่อนุญาตให้เปิดการแจ้งเตือน');
+      }
+    } else {
+      showToast('🔕 ปิดการแจ้งเตือนเรียบร้อยแล้ว');
+    }
+  });
+
+  // Toggle Chat Bubble Popover
+  historyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isHidden = historyPopover.classList.contains('hidden');
+    if (isHidden) {
+      openHistoryPopover();
+    } else {
+      closeHistoryPopover();
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!historyPopover.contains(e.target) && e.target !== historyBtn && !historyBtn.contains(e.target)) {
+      closeHistoryPopover();
+    }
   });
 }
 
-async function openHistoryModal() {
-  historyModal.classList.remove('hidden');
+async function openHistoryPopover() {
+  historyPopover.classList.remove('hidden');
   historyListContainer.innerHTML = `
     <div class="loading-spinner-box"><p>Loading history...</p></div>
   `;
@@ -135,7 +173,7 @@ async function openHistoryModal() {
 
   if (!shares || shares.length === 0) {
     historyListContainer.innerHTML = `
-      <div class="empty-feed-box"><p>ไม่มีประวัติการอัปโหลดขณะนี้ 🌸</p></div>
+      <div class="empty-feed-box"><p>ไม่มีประวัติขณะนี้ 🌸</p></div>
     `;
     return;
   }
@@ -146,32 +184,31 @@ async function openHistoryModal() {
     const rowEl = document.createElement('div');
     rowEl.className = 'history-item-row';
 
-    const uploadTimeStr = new Date(item.created_at).toLocaleString('th-TH');
-    const expiryTimeStr = new Date(item.expires_at).toLocaleString('th-TH');
+    const uploadTimeStr = new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const isAccessed = accessedList.includes(item.id);
     const titleStr = item.file_name || item.content || 'Item';
 
     rowEl.innerHTML = `
       <div class="history-item-info">
         <span class="history-item-title">${escapeHtml(titleStr)}</span>
-        <span class="history-item-meta">📅 อัปโหลด: ${uploadTimeStr}</span>
-        <span class="history-item-meta">⏱️ ลบเมื่อ: ${expiryTimeStr}</span>
+        <span class="history-item-meta">${uploadTimeStr}</span>
       </div>
-      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+      <div style="display: flex; align-items: center; gap: 6px;">
         <span class="history-status-badge ${isAccessed ? 'badge-accessed' : 'badge-active'}">
           ${isAccessed ? '🟢 โหลดแล้ว' : '⚪ รอการโหลด'}
         </span>
-        <button class="icon-btn-danger-outline delete-history-btn" style="padding: 3px 8px; font-size: 0.72rem;">
+        <button class="icon-btn-danger-outline delete-history-btn" style="padding: 2px 6px; font-size: 0.7rem;">
           🗑️
         </button>
       </div>
     `;
 
-    rowEl.querySelector('.delete-history-btn').addEventListener('click', async () => {
+    rowEl.querySelector('.delete-history-btn').addEventListener('click', async (e) => {
+      e.stopPropagation();
       if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
         await deleteShareRecordAndStorage(item.id, item.storage_path);
         showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
-        await openHistoryModal();
+        await openHistoryPopover();
         await refreshAppFeed();
       }
     });
@@ -180,8 +217,33 @@ async function openHistoryModal() {
   });
 }
 
-function closeHistoryModal() {
-  historyModal.classList.add('hidden');
+function closeHistoryPopover() {
+  historyPopover.classList.add('hidden');
+}
+
+// --- Realtime WebSocket Listener ---
+function initRealtimeSubscription() {
+  subscribeToRealtimeUploads((newRecord) => {
+    refreshAppFeed();
+
+    if ('Notification' in window && Notification.permission === 'granted' && popoverNotifyToggle.checked) {
+      const title = 'UpMee 🐰 มีไฟล์/ข้อความใหม่!';
+      const bodyText = newRecord.file_name 
+        ? `อัปโหลดไฟล์ใหม่: ${newRecord.file_name}`
+        : `ข้อความใหม่: ${newRecord.content ? newRecord.content.substring(0, 40) : ''}`;
+
+      const notification = new Notification(title, {
+        body: bodyText,
+        icon: '/bunny_mascot.png',
+        badge: '/icon-192.png'
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        openItemPreviewModal(newRecord);
+      };
+    }
+  });
 }
 
 // --- Expiration Pill Selector ---
