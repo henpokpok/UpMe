@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Production build output
+dist/
+
+# Local Environment Variables (Keep project credentials safe)
+.env
+.env.local
+*.local
+
+# System & Editor Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>upMe 🐰 — ส่งข้อความและไฟล์สุดน่ารัก ข้ามอุปกรณ์</title>
+  
+  <!-- SEO & Meta -->
+  <meta name="description" content="แอปส่งข้อความ ลิงก์ และไฟล์ข้ามอุปกรณ์ (Windows, Android, iPadOS) แบบง่ายๆ สุดน่ารัก ไม่ต้องล็อกอิน" />
+  <meta name="theme-color" content="#fce7f3" />
+  
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="upMe Bunny" />
+  
+  <!-- Google Fonts: Kanit (Thai) & Fredoka (Cute English & Numbers) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <!-- Decorative Floating Pastel Bubbles -->
+  <div class="bg-bubble bubble-1"></div>
+  <div class="bg-bubble bubble-2"></div>
+  <div class="bg-bubble bubble-3"></div>
+
+  <div id="app">
+    <!-- Cute Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <img src="/bunny_mascot.png" alt="upMe Bunny Mascot" class="bunny-logo-img" />
+        <div class="logo-title-group">
+          <span class="logo-text">up<span class="accent-text">Me</span> 🐰</span>
+          <span class="logo-subtitle">ฝากและรับไฟล์ข้ามเครื่องสุดน่ารัก</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="pwa-install-btn" class="icon-btn hidden" title="ติดตั้งแอปพลิเคชัน">
+          <span>📲 ติดตั้งแอป</span>
+        </button>
+
+        <button id="settings-btn" class="icon-btn" title="ตั้งค่า Supabase">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Single Page Main Container -->
+    <main class="main-container">
+
+      <!-- ==========================================
+           SECTION 1: 🎀 ส่งข้อความ / อัปโหลดไฟล์ (SEND)
+           ========================================== -->
+      <section class="page-card send-card">
+        <div class="card-title-group">
+          <span class="section-emoji">🎀</span>
+          <h2>ฝากส่งข้อความ หรือ ไฟล์</h2>
+        </div>
+
+        <!-- Mode Selector Switcher -->
+        <div class="content-type-toggle">
+          <button class="type-btn active" data-type="text">
+            <span>📝 ข้อความ / ลิงก์</span>
+          </button>
+          <button class="type-btn" data-type="file">
+            <span>📁 อัปโหลดไฟล์ (สูงสุด 50MB)</span>
+          </button>
+        </div>
+
+        <!-- Form Box -->
+        <form id="share-form" class="inner-form">
+          <!-- Text Input Area -->
+          <div id="text-input-group" class="form-group">
+            <label for="text-content">พิมพ์ข้อความ ลิงก์ หรือโน้ตที่นี่ 💭</label>
+            <textarea id="text-content" rows="4" placeholder="พิมพ์ข้อความ แปะลิงก์เว็บ หรือวางเนื้อหาที่นี่เลยจ้า..." required></textarea>
+          </div>
+
+          <!-- File Upload Dropzone -->
+          <div id="file-input-group" class="form-group hidden">
+            <label>เลือกไฟล์ที่ต้องการส่ง 🌸</label>
+            <div id="dropzone" class="file-dropzone">
+              <input type="file" id="file-input" class="hidden-file-input" />
+              <div class="dropzone-content">
+                <div class="dropzone-icon">✨</div>
+                <p class="dropzone-title">ลากไฟล์มาวางที่นี่ หรือ <span class="browse-btn">คลิกเพื่อเลือกไฟล์</span></p>
+                <p class="dropzone-subtitle">รองรับ รูปภาพ, เอกสาร, วิดีโอ, เสียง (ไม่เกิน 50MB)</p>
+              </div>
+              <div id="file-preview" class="file-preview hidden">
+                <div class="file-info">
+                  <span class="file-icon-badge">📄</span>
+                  <div class="file-meta">
+                    <span id="file-name" class="file-name">filename.pdf</span>
+                    <span id="file-size" class="file-size">2.4 MB</span>
+                  </div>
+                </div>
+                <button type="button" id="remove-file-btn" class="icon-btn-danger" title="ลบไฟล์">&times;</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Options Grid -->
+          <div class="options-grid">
+            <!-- Expiration Dropdown -->
+            <div class="form-group">
+              <label for="expiry-select">⏱️ ระยะเวลาหมดอายุ</label>
+              <select id="expiry-select" class="styled-select">
+                <option value="1h">1 ชั่วโมง</option>
+                <option value="8h">8 ชั่วโมง</option>
+                <option value="24h" selected>24 ชั่วโมง (1 วัน)</option>
+                <option value="7d">7 วัน</option>
+              </select>
+            </div>
+
+            <!-- One-time download toggle -->
+            <div class="form-group toggle-group">
+              <label class="toggle-label" for="one-time-toggle">
+                <div class="toggle-switch">
+                  <input type="checkbox" id="one-time-toggle" />
+                  <span class="slider"></span>
+                </div>
+                <div class="toggle-text">
+                  <span class="toggle-title">🔥 ลบทันทีหลังรับ</span>
+                  <span class="toggle-desc">ลบจากเซิร์ฟเวอร์ทันทีเมื่อเปิดอ่าน/โหลด</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Primary Submit Button -->
+          <button type="submit" id="submit-share-btn" class="primary-btn">
+            <span>💖 สร้างรหัสส่งของ (Generate Passcode)</span>
+          </button>
+        </form>
+
+        <!-- Sender Result Container -->
+        <div id="share-result" class="result-card hidden">
+          <div class="result-header">
+            <span class="success-icon">🎉</span>
+            <h3>สร้างรหัสรับของเรียบร้อยแล้ว!</h3>
+          </div>
+
+          <div class="passcode-box">
+            <span class="passcode-label">รหัสผ่าน 6 หลักของคุณคือ</span>
+            <div class="passcode-display">
+              <span id="result-passcode">123456</span>
+              <button id="copy-code-btn" class="copy-btn" title="คัดลอกรหัส">
+                📋 คัดลอก
+              </button>
+            </div>
+          </div>
+
+          <!-- QR Code & Direct URL -->
+          <div class="qr-share-section">
+            <div class="qr-container">
+              <canvas id="qr-canvas"></canvas>
+            </div>
+            <div class="qr-info">
+              <p class="qr-hint">สแกนด้วยกล้องมือถือ/iPad เพื่อเปิดดูได้ทันที 📱</p>
+              <div class="direct-url-box">
+                <input type="text" id="result-url" readonly />
+                <button id="copy-url-btn" class="icon-btn" title="คัดลอกลิงก์">📋 ลิงก์</button>
+              </div>
+            </div>
+          </div>
+
+          <button id="create-another-btn" class="secondary-btn">✨ ส่งใหม่อีกรายการ</button>
+        </div>
+      </section>
+
+      <!-- ==========================================
+           SECTION 2: 🎁 รับข้อความ / ไฟล์ (RECEIVE)
+           ========================================== -->
+      <section class="page-card receive-card" id="receive-section">
+        <div class="card-title-group">
+          <span class="section-emoji">🎁</span>
+          <h2>รับข้อความ หรือ ไฟล์</h2>
+        </div>
+        <p class="receive-desc">ใส่รหัส 6 หลักที่ได้รับจากผู้ส่ง เพื่อดูข้อความหรือดาวน์โหลดไฟล์</p>
+
+        <form id="receive-form" class="passcode-input-form">
+          <div class="passcode-input-wrapper">
+            <input type="text" id="receive-code-input" placeholder="เช่น 123456" maxlength="8" autocomplete="off" required />
+            <button type="submit" id="retrieve-btn" class="primary-btn search-btn">
+              <span>🐰 รับข้อมูล</span>
+            </button>
+          </div>
+        </form>
+
+        <!-- Retrieval Output Container -->
+        <div id="receive-output" class="receive-output-container hidden">
+          <!-- Dynamically populated output -->
+        </div>
+
+        <!-- Error Alert -->
+        <div id="receive-error" class="error-alert hidden">
+          <span>😿</span>
+          <span id="error-message">รหัสไม่ถูกต้อง หรือไฟล์หมดอายุแล้วจ้า</span>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Supabase Config Modal -->
+    <div id="config-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>⚙️ ตั้งค่า Supabase Project</h3>
+          <button id="close-modal-btn" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-desc">ใส่ Supabase URL และ Anon Key ของคุณ ข้อมูลจะถูกบันทึกอย่างปลอดภัยในเบราว์เซอร์ของคุณ</p>
+          <div class="form-group">
+            <label for="cfg-url">Supabase Project URL</label>
+            <input type="text" id="cfg-url" placeholder="https://your-project.supabase.co" />
+          </div>
+          <div class="form-group">
+            <label for="cfg-key">Supabase Anon Key</label>
+            <input type="password" id="cfg-key" placeholder="eyJhbGciOiJIUzI1NiIsIn..." />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="save-config-btn" class="primary-btn">บันทึกการตั้งค่า 💖</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
