@@ -1,11 +1,11 @@
 {
-  "name": "upMe - Cross Platform Share",
-  "short_name": "upMe",
-  "description": "Instant text, link, and file sharing across Windows, Android, and iPadOS without logins.",
+  "name": "UpMee - Instant Share",
+  "short_name": "UpMee",
+  "description": "Share text, links, and files across devices instantly.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0d1117",
-  "theme_color": "#6366f1",
+  "background_color": "#fdf2f8",
+  "theme_color": "#fce7f3",
   "orientation": "any",
   "icons": [
     {
@@ -19,6 +19,31 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "shortcuts": [
+    {
+      "name": "Message / Link",
+      "short_name": "Paste",
+      "description": "Paste message or link",
+      "url": "/?action=paste",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Upload File",
+      "short_name": "File",
+      "description": "Upload a file",
+      "url": "/?action=file",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

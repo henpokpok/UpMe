@@ -5,7 +5,8 @@ import {
   createShareItem,
   getActiveSharesList,
   deleteShareRecordAndStorage,
-  getStorageUsageInfo
+  getStorageUsageInfo,
+  subscribeToRealtimeUploads
 } from './supabase.js';
 
 // Application State
@@ -15,6 +16,7 @@ let deferredPwaPrompt = null;
 let currentActiveItem = null;
 
 // DOM Elements
+const notifyBtn = document.getElementById('notify-btn');
 const pillBtns = document.querySelectorAll('.pill-btn');
 const textContent = document.getElementById('text-content');
 const fileInput = document.getElementById('file-input');
@@ -60,6 +62,7 @@ const toast = document.getElementById('toast');
 
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
+  initNotifications();
   initPills();
   initDropzone();
   initForms();
@@ -68,7 +71,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initQrModal();
   initPWA();
   
+  handleIncomingShareAndShortcuts();
   refreshAppFeed();
+  initRealtimeSubscription();
 });
 
 // --- Toast Helper ---
@@ -88,6 +93,85 @@ function formatBytes(bytes, decimals = 1) {
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+// --- Notification Bell & Realtime Push ---
+function initNotifications() {
+  if ('Notification' in window) {
+    if (Notification.permission === 'granted') {
+      notifyBtn.style.color = '#10b981'; // Green active state
+    }
+  }
+
+  notifyBtn.addEventListener('click', async () => {
+    if (!('Notification' in window)) {
+      showToast('❌ เบราว์เซอร์ของคุณยังไม่รองรับการแจ้งเตือนนะจ๊ะ');
+      return;
+    }
+
+    if (Notification.permission === 'granted') {
+      showToast('🔔 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว');
+    } else {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        notifyBtn.style.color = '#10b981';
+        showToast('🎉 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว!');
+      } else {
+        showToast('⚠️ ไม่อนุญาตให้เปิดการแจ้งเตือน');
+      }
+    }
+  });
+}
+
+function initRealtimeSubscription() {
+  subscribeToRealtimeUploads((newRecord) => {
+    // Refresh Cloud Feed & Storage
+    refreshAppFeed();
+
+    // Trigger Mobile/Desktop Native Notification
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const title = 'UpMee 🐰 มีไฟล์/ข้อความใหม่!';
+      const bodyText = newRecord.file_name 
+        ? `อัปโหลดไฟล์ใหม่: ${newRecord.file_name}`
+        : `ข้อความใหม่: ${newRecord.content ? newRecord.content.substring(0, 40) : ''}`;
+
+      const notification = new Notification(title, {
+        body: bodyText,
+        icon: '/bunny_mascot.png',
+        badge: '/icon-192.png'
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        openItemPreviewModal(newRecord);
+      };
+    }
+  });
+}
+
+// --- Web Share Target & Quick Actions Parser ---
+function handleIncomingShareAndShortcuts() {
+  const urlParams = new URLSearchParams(window.location.search);
+
+  // 1. Web Share Target params from OS Share Sheet
+  const sharedTitle = urlParams.get('title');
+  const sharedText = urlParams.get('text');
+  const sharedUrl = urlParams.get('url');
+
+  if (sharedTitle || sharedText || sharedUrl) {
+    const combined = [sharedTitle, sharedText, sharedUrl].filter(Boolean).join('\n');
+    textContent.value = combined;
+    showToast('📥 รับข้อมูลที่แชร์มาจากแอปอื่นเรียบร้อยแล้ว!');
+  }
+
+  // 2. Quick Actions Shortcuts (Home Screen Long Press)
+  const action = urlParams.get('action');
+  if (action === 'paste') {
+    textContent.focus();
+    showToast('📝 พร้อมสำหรับพิมพ์/วางข้อความ');
+  } else if (action === 'file') {
+    fileInput.click();
+  }
 }
 
 // --- Expiration Pill Selector ---
@@ -286,7 +370,6 @@ function renderCloudItemBubbles(sharesList) {
     else if (isUrl) icon = '🔗';
 
     let displayTitle = item.file_name || item.content || 'Item';
-
     const expiryTime = new Date(item.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     cardEl.innerHTML = `

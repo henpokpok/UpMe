@@ -7,7 +7,7 @@
 CREATE TABLE IF NOT EXISTS public.shares (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code VARCHAR(6) NOT NULL,
-    type VARCHAR(10) NOT NULL CHECK (type IN ('text', 'file')),
+    type VARCHAR(10) NOT NULL CHECK (type IN ('text', 'file', 'both')),
     content TEXT NOT NULL,
     storage_path TEXT DEFAULT NULL,
     file_name TEXT DEFAULT NULL,
@@ -38,7 +38,7 @@ FOR INSERT
 TO anon, authenticated 
 WITH CHECK (true);
 
--- Allow anonymous users to DELETE shares (Required for One-Time Download auto-deletion)
+-- Allow anonymous users to DELETE shares
 CREATE POLICY "Allow public delete shares" 
 ON public.shares 
 FOR DELETE 
@@ -46,15 +46,19 @@ TO anon, authenticated
 USING (true);
 
 
--- 3. SUPABASE STORAGE BUCKET CONFIGURATION ('user-shares')
--- Insert public storage bucket if not already present
+-- 3. ENABLE SUPABASE REALTIME PUBLICATION ON SHARES TABLE
+-- Enables instant WebSocket broadcasts across mobile/desktop when a new row is inserted
+ALTER PUBLICATION supabase_realtime ADD TABLE public.shares;
+
+
+-- 4. SUPABASE STORAGE BUCKET CONFIGURATION ('user-shares')
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
   'user-shares', 
   'user-shares', 
   true, 
   52428800, -- 50MB in bytes
-  NULL -- Allows all mime types
+  NULL
 )
 ON CONFLICT (id) DO UPDATE 
 SET public = true, file_size_limit = 52428800;
@@ -76,26 +80,20 @@ TO anon, authenticated
 USING (bucket_id = 'user-shares');
 
 
--- 4. BACKGROUND AUTO-DESTRUCT SYSTEM (pg_cron)
--- Enable the pg_cron extension (Supabase supports pg_cron on free tier database extensions)
+-- 5. BACKGROUND AUTO-DESTRUCT SYSTEM (pg_cron)
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
--- Schedule cron job running every 5 minutes to delete expired database records
 SELECT cron.schedule(
     'auto-delete-expired-shares',
-    '*/5 * * * *', -- Every 5 minutes
+    '*/5 * * * *',
     $$ DELETE FROM public.shares WHERE expires_at < now(); $$
 );
 
 
--- 5. AUTOMATIC STORAGE FILE CLEANUP ON RECORD DELETION
--- Function & Trigger to automatically clean up storage files when a row is deleted (via cron or one-time download)
-
--- Step 5A: Function to delete storage object using Supabase Storage Internal API / pg_net
+-- 6. AUTOMATIC STORAGE FILE CLEANUP ON RECORD DELETION
 CREATE OR REPLACE FUNCTION public.handle_deleted_share_storage()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Check if deleted row contained a storage path
     IF OLD.storage_path IS NOT NULL AND OLD.storage_path != '' THEN
         DELETE FROM storage.objects 
         WHERE bucket_id = 'user-shares' 
@@ -105,7 +103,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Step 5B: Trigger attached to AFTER DELETE on public.shares
 DROP TRIGGER IF EXISTS trigger_delete_share_storage ON public.shares;
 
 CREATE TRIGGER trigger_delete_share_storage

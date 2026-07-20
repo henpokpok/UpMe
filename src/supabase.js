@@ -91,7 +91,6 @@ export async function createShareItem({ textContent, file, durationKey }) {
     type = textContent ? 'both' : 'file';
   }
 
-  // Content field fallback
   const finalContent = textContent || publicUrl || '';
 
   // 2. Insert record into database
@@ -141,6 +140,29 @@ export async function getActiveSharesList() {
   }
 
   return data || [];
+}
+
+/**
+ * Subscribe to Realtime WebSocket INSERT broadcasts on 'shares' table
+ */
+export function subscribeToRealtimeUploads(onNewUpload) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const channel = supabase
+    .channel('upme-realtime-channel')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'shares' },
+      (payload) => {
+        if (payload && payload.new) {
+          onNewUpload(payload.new);
+        }
+      }
+    )
+    .subscribe();
+
+  return channel;
 }
 
 /**
