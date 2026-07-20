@@ -100,7 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // --- Toast Helper ---
-function showToast(msg, duration = 3500) {
+function showToast(msg, duration = 4000) {
   toast.textContent = msg;
   toast.classList.remove('hidden');
   setTimeout(() => {
@@ -160,7 +160,15 @@ function urlBase64ToUint8Array(base64String) {
 
 // Register background Web Push PushManager subscription with fresh VAPID Key
 async function registerWebPushSubscription() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  if (!('serviceWorker' in navigator)) {
+    showToast('⚠️ เบราว์เซอร์นี้ยังไม่รองรับ ServiceWorker');
+    return;
+  }
+
+  if (!('PushManager' in window)) {
+    showToast('⚠️ บน iPad/iPhone ต้องแตะ "เพิ่มไปยังหน้าจอโฮม" และเปิดจากไอคอนโฮมสกรีนเท่านั้นนะจ๊ะ');
+    return;
+  }
 
   try {
     const reg = await navigator.serviceWorker.ready;
@@ -187,14 +195,14 @@ async function registerWebPushSubscription() {
     if (sub) {
       const res = await savePushSubscription(sub.toJSON());
       if (res && res.success) {
-        showToast('🔔 ลงทะเบียนการแจ้งเตือนเตือนยิงข้ามอุปกรณ์สำเร็จ!');
+        showToast('🔔 บันทึก Push Token เข้าฐานข้อมูลสำเร็จ!');
       } else {
-        showToast(`⚠️ บันทึก Push Token: ${res?.error || 'RLS Check'}`);
+        showToast(`❌ บันทึก Token ไม่สำเร็จ: ${res?.error || 'RLS Policy'}`);
       }
     }
   } catch (err) {
     console.warn('Web Push Manager note:', err);
-    showToast(`⚠️ Push Register: ${err.message || 'Check Browser Settings'}`);
+    showToast(`❌ Push Error: ${err.message}`);
   }
 }
 
