@@ -101,25 +101,49 @@ body {
   z-index: 200;
 }
 
-.logo-area {
+.brand-title, .logo-area {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.bunny-logo-img {
-  width: 32px;
-  height: 32px;
+.header-logo-img, .bunny-logo-img {
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   object-fit: cover;
   border: 1.5px solid var(--accent-pink);
+  flex-shrink: 0;
 }
 
-.logo-text {
-  font-size: 1.25rem;
+.brand-text-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-name, .logo-text {
+  font-size: 1.15rem;
   font-weight: 700;
   color: var(--text-pink);
   letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.1;
+}
+
+.brand-badge {
+  font-size: 0.6rem;
+  font-weight: 700;
+  background: var(--accent-pink-light);
+  color: var(--text-pink);
+  padding: 1px 5px;
+  border-radius: 8px;
+}
+
+.brand-tagline {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
 }
 
 .header-actions {
