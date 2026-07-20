@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>UpMee 🐰 Cloud Share</title>
+  <title>UpMee 🐰 Cloud Share & Temporary Files</title>
   
   <!-- SEO & PWA Meta Tags -->
   <meta name="description" content="UpMee - ระบบรับส่งไฟล์และแปะข้อความชั่วคราว สะดวก รวดเร็ว ทำงานข้ามอุปกรณ์">
@@ -26,23 +26,32 @@
     <header class="app-header">
       <div class="brand-title">
         <img src="/bunny_mascot.png" alt="UpMee Bunny" class="header-logo-img">
-        <span class="brand-name">UpMee</span>
+        <div class="brand-text-group">
+          <span class="brand-name">UpMee <span class="brand-badge">PRO</span></span>
+          <span class="brand-tagline">Temporary Cloud Share</span>
+        </div>
       </div>
 
       <div class="header-actions">
         <!-- History Button (Triggers Chat Bubble Popover) -->
-        <button id="history-btn" class="header-icon-btn history-trigger-btn" title="ประวัติการ upload" aria-label="ประวัติการ upload">
-          <svg class="header-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="9"/>
-            <polyline points="12 7 12 12 15 15"/>
+        <button id="history-btn" class="header-icon-btn history-trigger-btn" title="ประวัติการ upload & Notification" aria-label="ประวัติการ upload">
+          <svg class="header-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </button>
+
+        <!-- PWA Install Button -->
+        <button id="pwa-install-btn" class="header-icon-btn hidden" title="ติดตั้งแอป UpMee บนเครื่อง">
+          <svg class="header-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
           </svg>
         </button>
 
         <!-- Settings Button -->
-        <button id="settings-btn" class="header-icon-btn" title="ตั้งค่า">
-          <svg class="header-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/>
-            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+        <button id="settings-btn" class="header-icon-btn" title="ตั้งค่า Supabase API">
+          <svg class="header-svg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
           </svg>
         </button>
       </div>
@@ -61,7 +70,7 @@
           </label>
         </div>
       </div>
-      <button type="button" id="force-register-push-btn">
+      <button type="button" id="force-register-push-btn" class="secondary-btn" style="width: 100%; margin: 6px 0; padding: 6px 10px; font-size: 0.8rem; border-radius: 8px;">
         🔔 ลงทะเบียน Push แจ้งเตือนบนเครื่องนี้
       </button>
       <div id="history-list-container" class="history-list-scroll">
@@ -72,50 +81,55 @@
     <!-- Storage Capacity Bar Card -->
     <section class="storage-card">
       <div class="storage-info-header">
-        <span class="storage-label">Storage</span>
+        <div class="storage-title-group">
+          <span class="storage-icon">☁️</span>
+          <span class="storage-label">Cloud Storage Usage</span>
+        </div>
         <span id="storage-usage-text" class="storage-value">0%</span>
       </div>
       <div class="storage-progress-track">
         <div id="storage-progress-fill" class="storage-progress-fill" style="width: 0%;"></div>
       </div>
-    </section>
-
-    <!-- Cloud Feed Section (PLACED ON TOP OF UPLOAD FORM) -->
-    <section class="feed-section-card">
-      <div class="feed-header">
-        <span class="feed-cloud-icon">☁️</span>
-        <button type="button" id="refresh-feed-btn" class="icon-refresh-btn" title="รีเฟรช">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-            <path d="M23 4v6h-6M1 20v-6h6"/>
-            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-          </svg>
-        </button>
-      </div>
-
-      <div id="live-feed-container" class="live-feed-container">
-        <!-- Live feed cards dynamically inserted here -->
+      <div class="storage-footer-note">
+        <span>Free Tier Capacity Limit: 1,000 MB</span>
       </div>
     </section>
 
-    <!-- Upload Form Card (PLACED AT THE BOTTOM) -->
-    <main class="upload-form-card">
-      <h2 class="form-card-title">Upload Mee</h2>
-      
+    <!-- Upload Form Card -->
+    <main class="main-card">
       <form id="share-form" class="share-form">
-        <!-- Message / Link -->
+        
+        <!-- Tab Expiration Selectors -->
         <div class="form-group">
-          <label for="text-content" class="input-label-pink">Message / Link</label>
-          <textarea id="text-content" class="custom-textarea" rows="3" placeholder="text here"></textarea>
+          <label class="input-label">ระยะเวลาเก็บไฟล์ (Retention Period)</label>
+          <div class="expiration-pill-selector">
+            <button type="button" class="pill-btn" data-value="1h">1 ชม.</button>
+            <button type="button" class="pill-btn" data-value="8h">8 ชม.</button>
+            <button type="button" class="pill-btn active" data-value="24h">24 ชม.</button>
+            <button type="button" class="pill-btn" data-value="7d">7 วัน</button>
+          </div>
         </div>
 
-        <!-- แนบไฟล์ ไม่เกิน 50MB -->
+        <!-- Text / Link Area -->
         <div class="form-group">
-          <label class="input-label-pink">แนบไฟล์ ไม่เกิน 50MB</label>
-          <div id="dropzone" class="dropzone-dashed-box">
+          <label for="text-content" class="input-label">แปะข้อความ หรือ ลิงก์ (Text or Link)</label>
+          <textarea id="text-content" class="custom-textarea" rows="3" placeholder="พิมพ์ข้อความ รหัส วางลิงก์ หรือโน้ตชั่วคราวที่นี่..."></textarea>
+        </div>
+
+        <!-- File Upload Dropzone -->
+        <div class="form-group">
+          <label class="input-label">อัปโหลดไฟล์ (File Attachment - Max 50MB)</label>
+          <div id="dropzone" class="dropzone-area">
             <input type="file" id="file-input" class="hidden-file-input">
             
             <div class="dropzone-content">
-              <p class="dropzone-text">แนบไฟล์ / ลากมาวาง</p>
+              <div class="upload-icon-wrapper">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                </svg>
+              </div>
+              <p class="dropzone-main-text">ลากไฟล์มาวางที่นี่ หรือ <span class="highlight-text">คลิกเพื่อเลือกไฟล์</span></p>
+              <p class="dropzone-sub-text">รองรับ รูปภาพ, เอกสาร, PDF, ZIP (สูงสุด 50MB)</p>
             </div>
 
             <!-- File Selected Preview -->
@@ -132,23 +146,27 @@
           </div>
         </div>
 
-        <!-- ระยะเวลาหมดอายุไฟล์ -->
-        <div class="form-group">
-          <label class="input-label-pink">ระยะเวลาหมดอายุไฟล์</label>
-          <div class="expiration-pill-selector">
-            <button type="button" class="pill-btn" data-value="1h">1 ชม.</button>
-            <button type="button" class="pill-btn" data-value="8h">8 ชม.</button>
-            <button type="button" class="pill-btn active" data-value="24h">24 ชม.</button>
-            <button type="button" class="pill-btn" data-value="7d">1 อาทิตย์</button>
-          </div>
-        </div>
-
-        <!-- Full Width Pill Submit Button -->
-        <button type="submit" id="submit-share-btn" class="primary-pill-btn">
+        <!-- Upload Action Button -->
+        <button type="submit" id="submit-share-btn" class="primary-btn submit-btn">
           <span>Upload 🐰</span>
         </button>
+
       </form>
     </main>
+
+    <!-- Cloud Feed Section -->
+    <section class="feed-section">
+      <div class="feed-header">
+        <h2 class="feed-title">☁️ ไฟล์และข้อความบนคลาวด์</h2>
+        <button type="button" id="refresh-feed-btn" class="secondary-btn icon-btn-sm" title="รีเฟรช">
+          🔄 Refresh
+        </button>
+      </div>
+
+      <div id="live-feed-container" class="live-feed-container">
+        <!-- Live feed cards dynamically inserted here -->
+      </div>
+    </section>
 
   </div>
 
@@ -161,16 +179,16 @@
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label for="cfg-url" class="input-label-pink">Supabase URL</label>
+          <label for="cfg-url" class="input-label">Supabase URL</label>
           <input type="text" id="cfg-url" class="custom-input" placeholder="https://xxx.supabase.co">
         </div>
         <div class="form-group">
-          <label for="cfg-key" class="input-label-pink">Supabase Anon Key</label>
+          <label for="cfg-key" class="input-label">Supabase Anon Key</label>
           <input type="password" id="cfg-key" class="custom-input" placeholder="eyJhbGciOi...">
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" id="save-config-btn" class="primary-pill-btn">บันทึกตั้งค่า 💖</button>
+        <button type="button" id="save-config-btn" class="primary-btn">บันทึกตั้งค่า 💖</button>
       </div>
     </div>
   </div>
