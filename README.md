@@ -1,13 +1,43 @@
-# upMe — Instant Cross-Platform Share (Text, Links & Files)
+# 📦 UpMee — Instant Cross-Platform Share (Files, Links & Text)
 
-> A secure, lightweight, cross-platform Progressive Web Application (PWA) for single-user cross-device file & text sharing (Windows, Android, iPadOS) without user logins.
+![PWA](https://img.shields.io/badge/PWA-Cross--Platform-5A0FC8?style=for-the-badge&logo=pwa)
+![Vite](https://img.shields.io/badge/Vite-Vanilla%20JS-646CFF?style=for-the-badge&logo=vite)
+![Supabase](https://img.shields.io/badge/Supabase-Storage%20%26%20Database-3ECF8E?style=for-the-badge&logo=supabase)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pg__cron-4169E1?style=for-the-badge&logo=postgresql)
+![Netlify](https://img.shields.io/badge/Netlify-Deployed-00C7B7?style=for-the-badge&logo=netlify)
+![License](https://img.shields.io/badge/Copyright-henpokpok-red?style=for-the-badge)
+
+> A secure, lightweight, cross-platform Progressive Web Application (PWA) designed for frictionless file, link, and text sharing across Windows, Android, iOS, and iPadOS devices without cumbersome logins or bluetooth constraints.
 
 ---
 
-## 🏗️ Decoupled Architecture
+## ✨ Key Features & Problem Solved
 
-- **Frontend SPA**: Vanilla JavaScript + Vite + CSS Glassmorphism design system, hosted on **Netlify**.
+- 📲 **Frictionless Cross-Device Transfers**: Solves the pain of sending files between different operating systems (Windows, Android, iPadOS, iOS) via a unified web interface.
+- ⏳ **Custom Expiration & Self-Destruct**: Set auto-deletion timers (1 Hour, 8 Hours, 24 Hours, or 7 Days) or enable **One-Time Download** to auto-destruct immediately after retrieval.
+- 🔢 **Passcode & QR Code Retrieval**: Access shared content instantly using a 6-digit numeric passcode or by scanning an auto-generated QR code.
+- 🧹 **Automated Database & Storage Cleanup**: Uses PostgreSQL `pg_cron` jobs and database triggers to purge expired records and storage buckets every 5 minutes.
+- 📱 **Native PWA Experience**: Installable on home screens as a standalone, distraction-free app across all desktop and mobile platforms.
+
+---
+
+## 🏗️ Architecture Overview
+
+- **Frontend SPA**: Vanilla JavaScript + Vite + Custom Glassmorphism design system.
 - **Backend & Storage**: **Supabase** (PostgreSQL, Row Level Security, Storage Buckets, and `pg_cron` auto-cleanup).
+
+```
+[ Sender Device ] ── (Paste Text / Drag File) ──> [ UpMee PWA UI ]
+                                                        │
+                                                        ▼
+                                              [ Supabase Backend ]
+                                         (Stores File & Sets Passcode)
+                                                        │
+                                     ┌──────────────────┴──────────────────┐
+                                     ▼                                     ▼
+                            [ Recipient Device ]                [ PostgreSQL pg_cron ]
+                        (Fetches via Passcode/QR)            (Purges Expired Data 5m)
+```
 
 ---
 
@@ -16,36 +46,38 @@
 ### STEP 1: Supabase Backend Setup
 
 1. **Create a Supabase Project**:
-   - Go to [supabase.com](https://supabase.com) and create a free tier project.
-   - Copy your **Project URL** and **`anon` (public) API Key** from **Project Settings -> API**.
+   - Go to [supabase.com](https://supabase.com) and create a free project.
+   - Copy your **Project URL** and **`anon` public API Key** from **Project Settings -> API**.
 
 2. **Execute SQL Setup Script**:
-   - Open your Supabase Dashboard -> **SQL Editor**.
-   - Copy and paste the entire contents of [`supabase_setup.sql`](file:///c:/Users/bhupa/.gemini/antigravity/scratch/upMe/supabase_setup.sql).
-   - Click **Run**.
-   - This automatically creates:
-     - The `shares` database table with UUID primary key, passcode column, expiration timestamps, and indexes.
-     - Row Level Security (RLS) policies allowing anonymous access with valid passcodes.
-     - The `user-shares` public storage bucket with a 50MB file size limit.
-     - The `pg_cron` background job running every 5 minutes to delete expired shares.
-     - A Database Trigger (`trigger_delete_share_storage`) that automatically purges files from storage when database records are deleted.
+   - Open Supabase Dashboard -> **SQL Editor**.
+   - Execute the contents of [`supabase_setup.sql`](supabase_setup.sql).
+   - This automatically configures:
+     - The `shares` database table with UUID primary keys and passcode columns.
+     - Row Level Security (RLS) policies.
+     - Storage bucket limits (50MB per file).
+     - The `pg_cron` background job running every 5 minutes.
+     - Storage deletion triggers (`trigger_delete_share_storage`).
 
 ---
 
-### STEP 2: Local Project Setup & Development
+### STEP 2: Local Project Setup
 
 1. **Install Dependencies**:
    ```bash
    npm install
    ```
 
-2. **Environment Configuration** (Optional):
-   Create a `.env` file in the root directory:
+2. **Environment Configuration**:
+   Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+   Add your credentials:
    ```env
    VITE_SUPABASE_URL=https://your-supabase-project.supabase.co
-   VITE_SUPABASE_ANON_KEY=your-actual-anon-key-here
+   VITE_SUPABASE_ANON_KEY=your_anon_key_here
    ```
-   *(Note: You can also configure credentials directly inside the web app UI by clicking the ⚙️ Settings icon in the header).*
 
 3. **Start Development Server**:
    ```bash
@@ -55,28 +87,7 @@
 
 ---
 
-### STEP 3: Deploying to Netlify
-
-#### Option A: Netlify Dashboard (Git Integration)
-1. Push this project codebase to a GitHub / GitLab repository.
-2. Log in to [Netlify](https://netlify.com) -> **Add new site** -> **Import an existing project**.
-3. Configure build settings:
-   - **Build Command**: `npm run build`
-   - **Publish Directory**: `dist`
-4. Add Environment Variables under **Site Configuration -> Environment Variables**:
-   - Key: `VITE_SUPABASE_URL`, Value: `https://your-supabase-project.supabase.co`
-   - Key: `VITE_SUPABASE_ANON_KEY`, Value: `your-anon-key`
-5. Click **Deploy Site**.
-
-#### Option B: Netlify CLI
-```bash
-npm run build
-npx netlify-cli deploy --prod --dir=dist
-```
-
----
-
-## 📱 Features & Device Verification
+## 📱 User Workflows
 
 ### 1. Sender Flow
 - Paste text/links or drag and drop files up to 50MB.
@@ -84,11 +95,15 @@ npx netlify-cli deploy --prod --dir=dist
 - Toggle **One-Time Download** to auto-destruct immediately after retrieval.
 - Generates a 6-digit numeric passcode and an auto-embedded QR Code (`https://your-app.netlify.app/?code=123456`).
 
-### 2. Receiver Flow (Windows, Android, iPadOS)
+### 2. Receiver Flow (Windows, Android, iPadOS, iOS)
 - Enter 6-digit passcode or scan QR code.
 - Query automatically validates `code = :input_code AND expires_at > now()`.
 - One-click **Copy Text to Clipboard** or **Download File**.
 
-### 3. PWA Native Experience
-- Click **Install** in the app header (or **Add to Home Screen** on iOS/iPadOS Safari & Android Chrome).
-- Works as a standalone, distraction-free app across all platforms.
+---
+
+### 📜 Copyright & Portfolio Viewing Notice
+© 2026 henpokpok. All rights reserved.
+
+This repository and source code are published strictly for portfolio viewing and evaluation purposes. 
+Unauthorized copying, reproduction, distribution, or commercial use of any part of this project is strictly prohibited.

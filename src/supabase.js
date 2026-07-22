@@ -55,6 +55,17 @@ function calculateExpirationISO(durationKey) {
 }
 
 /**
+ * Get public URL for a file stored in Supabase Storage
+ */
+export function getFilePublicUrl(storagePath) {
+  if (!storagePath) return null;
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const { data } = supabase.storage.from('user-shares').getPublicUrl(storagePath);
+  return data ? data.publicUrl : null;
+}
+
+/**
  * Save device push subscription token for background Web Push notifications
  */
 export async function savePushSubscription(subscription) {
@@ -129,10 +140,11 @@ export async function createShareItem({ textContent, file, durationKey }) {
     type = textContent ? 'both' : 'file';
   }
 
-  const finalContent = textContent || publicUrl || '';
+  // If text is provided, content stores the text; if only file, content stores the publicUrl
+  const finalContent = textContent ? textContent : (publicUrl || '');
 
-  // 2. Insert record into database
-  const { data, error: dbError } = await supabase
+  // 2. Insert record into database with automatic constraint fallback
+  let { data, error: dbError } = await supabase
     .from('shares')
     .insert([
       {
@@ -148,6 +160,32 @@ export async function createShareItem({ textContent, file, durationKey }) {
     ])
     .select()
     .single();
+
+  // If DB check constraint fails for 'both', fallback to 'file' or 'text' for backwards compatibility
+  if (dbError && dbError.message && dbError.message.includes('shares_type_check')) {
+    const fallbackType = file ? 'file' : 'text';
+    const { data: retryData, error: retryError } = await supabase
+      .from('shares')
+      .insert([
+        {
+          code: passcode,
+          type: fallbackType,
+          content: finalContent,
+          storage_path: storagePath,
+          file_name: fileName,
+          file_size: fileSize,
+          one_time_download: false,
+          expires_at: expiresAt
+        }
+      ])
+      .select()
+      .single();
+
+    if (!retryError) {
+      data = retryData;
+      dbError = null;
+    }
+  }
 
   if (dbError) {
     if (storagePath) {
@@ -217,14 +255,12 @@ export function subscribeToRealtimeUploads(onNewUpload) {
 
 /**
  * Delete a share record and storage file manually
- * Returns detailed result object { success: boolean, error: string | null }
  */
 export async function deleteShareRecordAndStorage(id, storagePath) {
   const supabase = getSupabaseClient();
   if (!supabase) return { success: false, error: 'Supabase client not configured' };
 
   try {
-    // 1. Delete DB record from shares table
     const { error: dbError } = await supabase
       .from('shares')
       .delete()
@@ -235,7 +271,6 @@ export async function deleteShareRecordAndStorage(id, storagePath) {
       return { success: false, error: dbError.message };
     }
 
-    // 2. Storage file cleanup via Storage API (fire & forget, non-blocking)
     if (storagePath) {
       supabase.storage
         .from('user-shares')

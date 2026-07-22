@@ -7,7 +7,8 @@ import {
   deleteShareRecordAndStorage,
   getStorageUsageInfo,
   subscribeToRealtimeUploads,
-  savePushSubscription
+  savePushSubscription,
+  getFilePublicUrl
 } from './supabase.js';
 
 // Local Storage Key for Accessed Items
@@ -70,6 +71,7 @@ const cfgKey = document.getElementById('cfg-key');
 const itemModal = document.getElementById('item-modal');
 const closeItemModalBtn = document.getElementById('close-item-modal-btn');
 const modalItemBadge = document.getElementById('modal-item-badge');
+const modalFileName = document.getElementById('modal-file-name');
 const modalPreviewArea = document.getElementById('modal-preview-area');
 const modalTextContent = document.getElementById('modal-text-content');
 const modalCopyBtn = document.getElementById('modal-copy-btn');
@@ -81,6 +83,7 @@ const modalDeleteBtn = document.getElementById('modal-delete-btn');
 const qrModal = document.getElementById('qr-modal');
 const closeQrModalBtn = document.getElementById('close-qr-modal-btn');
 const qrModalCanvas = document.getElementById('qr-modal-canvas');
+const qrNativeShareBtn = document.getElementById('qr-native-share-btn');
 
 const pwaInstallBtn = document.getElementById('pwa-install-btn');
 const toast = document.getElementById('toast');
@@ -98,6 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   refreshAppFeed();
   initRealtimeSubscription();
+  checkSharedDataFromGallery();
 
   // Auto-refresh feed whenever tab becomes active/visible
   document.addEventListener('visibilitychange', () => {
@@ -107,8 +111,46 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// Helper to load shared images/files sent directly from phone's Gallery Share Menu
+async function checkSharedDataFromGallery() {
+  if (!('caches' in window)) return;
+  try {
+    const cache = await caches.open('upmee-shared-data');
+
+    // Check shared text
+    const textRes = await cache.match('/shared-text');
+    if (textRes) {
+      const sharedText = await textRes.text();
+      if (sharedText && textContent) {
+        textContent.value = sharedText;
+      }
+      await cache.delete('/shared-text');
+    }
+
+    // Check shared file from gallery app
+    const fileRes = await cache.match('/shared-file');
+    if (fileRes) {
+      const blob = await fileRes.blob();
+      const rawFileName = fileRes.headers.get('x-file-name') ? decodeURIComponent(fileRes.headers.get('x-file-name')) : 'shared_image.jpg';
+      const sharedFile = new File([blob], rawFileName, { type: blob.type || 'image/jpeg' });
+      
+      handleFileSelection(sharedFile);
+      await cache.delete('/shared-file');
+      showToast('📷 Image loaded from Gallery share!');
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('shared') === 'true') {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  } catch (err) {
+    console.warn('Error reading shared data from gallery:', err);
+  }
+}
+
 // --- Toast Helper ---
 function showToast(msg, duration = 4000) {
+  if (!toast) return;
   toast.textContent = msg;
   toast.classList.remove('hidden');
   setTimeout(() => {
@@ -126,7 +168,7 @@ function formatBytes(bytes, decimals = 1) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// Clean concise remaining time format without the word "เหลือ"
+// Clean concise remaining time format
 function formatRemainingTimeClean(expiresAtISO) {
   const diffMs = new Date(expiresAtISO) - new Date();
   if (diffMs <= 0) return 'Expired';
@@ -166,15 +208,16 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// Register background Web Push PushManager subscription with fresh VAPID Key
-async function registerWebPushSubscription() {
+// Register background Web Push PushManager subscription
+// silent = true on auto-load to avoid toast notifications every time the user enters the app
+async function registerWebPushSubscription(silent = false) {
   if (!('serviceWorker' in navigator)) {
-    showToast('⚠️ เบราว์เซอร์นี้ยังไม่รองรับ ServiceWorker');
+    if (!silent) showToast('⚠️ เบราว์เซอร์นี้ยังไม่รองรับ ServiceWorker');
     return;
   }
 
   if (!('PushManager' in window)) {
-    showToast('⚠️ บน iPad/iPhone ต้องแตะ "เพิ่มไปยังหน้าจอโฮม" และเปิดจากไอคอนโฮมสกรีนเท่านั้นนะจ๊ะ');
+    if (!silent) showToast('⚠️ บน iPad/iPhone ต้องแตะ "เพิ่มไปยังหน้าจอโฮม" และเปิดจากไอคอนโฮมสกรีนเท่านั้นนะจ๊ะ');
     return;
   }
 
@@ -182,7 +225,6 @@ async function registerWebPushSubscription() {
     const reg = await navigator.serviceWorker.register('/sw.js');
     let sub = await reg.pushManager.getSubscription();
 
-    // Always clear old stale subscriptions to force a clean new Push Token with the new VAPID Key
     if (sub) {
       try {
         await sub.unsubscribe();
@@ -191,7 +233,6 @@ async function registerWebPushSubscription() {
       }
     }
 
-    // Mathematically valid NIST P-256 VAPID Public Key
     const publicVapidKey = 'BCKyt1Zaqd4A2WUFCxedHrZCQXSTlOP2EJo9dYTuaOzzJ0suZmAPZkCLEUkggxsQXuDShNwxo2SQzuHQMyfBTjs';
     const convertedKey = urlBase64ToUint8Array(publicVapidKey);
 
@@ -203,70 +244,75 @@ async function registerWebPushSubscription() {
     if (sub) {
       const res = await savePushSubscription(sub.toJSON());
       if (res && res.success) {
-        showToast('🔔 บันทึก Push Token เข้าฐานข้อมูลสำเร็จ!');
+        if (!silent) showToast('🔔 บันทึก Push Token เข้าฐานข้อมูลสำเร็จ!');
       } else {
-        showToast(`❌ บันทึก Token ไม่สำเร็จ: ${res?.error || 'RLS Policy'}`);
+        if (!silent) showToast(`❌ บันทึก Token ไม่สำเร็จ: ${res?.error || 'RLS Policy'}`);
       }
     }
   } catch (err) {
     console.warn('Web Push Manager note:', err);
-    showToast(`❌ Push Error: ${err.message}`);
+    if (!silent) showToast(`❌ Push Error: ${err.message}`);
   }
 }
 
 // --- Chat Bubble Popover (History + Notifications Toggle) ---
 function initHistoryPopover() {
   if ('Notification' in window && Notification.permission === 'granted') {
-    popoverNotifyToggle.checked = true;
-    registerWebPushSubscription();
+    if (popoverNotifyToggle) popoverNotifyToggle.checked = true;
+    registerWebPushSubscription(true); // Silent sync on page load
   }
 
   if (forceRegisterPushBtn) {
     forceRegisterPushBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      registerWebPushSubscription();
+      registerWebPushSubscription(false); // Explicit click -> Shows toast
     });
   }
 
-  popoverNotifyToggle.addEventListener('change', async () => {
-    if (!('Notification' in window)) {
-      showToast('❌ เบราว์เซอร์นี้ยังไม่รองรับการแจ้งเตือนนะจ๊ะ');
-      popoverNotifyToggle.checked = false;
-      return;
-    }
-
-    if (popoverNotifyToggle.checked) {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        showToast('🔔 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว!');
-        registerWebPushSubscription();
-      } else {
+  if (popoverNotifyToggle) {
+    popoverNotifyToggle.addEventListener('change', async () => {
+      if (!('Notification' in window)) {
+        showToast('❌ เบราว์เซอร์นี้ยังไม่รองรับการแจ้งเตือนนะจ๊ะ');
         popoverNotifyToggle.checked = false;
-        showToast('⚠️ ไม่อนุญาตให้เปิดการแจ้งเตือน');
+        return;
       }
-    } else {
-      showToast('🔕 ปิดการแจ้งเตือนเรียบร้อยแล้ว');
-    }
-  });
 
-  historyBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const isHidden = historyPopover.classList.contains('hidden');
-    if (isHidden) {
-      openHistoryPopover();
-    } else {
-      closeHistoryPopover();
-    }
-  });
+      if (popoverNotifyToggle.checked) {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          showToast('🔔 เปิดใช้งานการแจ้งเตือนเรียบร้อยแล้ว!');
+          registerWebPushSubscription(false);
+        } else {
+          popoverNotifyToggle.checked = false;
+          showToast('⚠️ ไม่อนุญาตให้เปิดการแจ้งเตือน');
+        }
+      } else {
+        showToast('🔕 ปิดการแจ้งเตือนเรียบร้อยแล้ว');
+      }
+    });
+  }
+
+  if (historyBtn) {
+    historyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isHidden = historyPopover.classList.contains('hidden');
+      if (isHidden) {
+        openHistoryPopover();
+      } else {
+        closeHistoryPopover();
+      }
+    });
+  }
 
   document.addEventListener('click', (e) => {
-    if (!historyPopover.contains(e.target) && e.target !== historyBtn && !historyBtn.contains(e.target)) {
+    if (historyPopover && !historyPopover.contains(e.target) && historyBtn && !historyBtn.contains(e.target)) {
       closeHistoryPopover();
     }
   });
 }
 
 async function openHistoryPopover() {
+  if (!historyPopover) return;
   historyPopover.classList.remove('hidden');
   historyListContainer.innerHTML = `
     <div class="loading-spinner-box"><p>Loading history...</p></div>
@@ -331,7 +377,7 @@ async function openHistoryPopover() {
 }
 
 function closeHistoryPopover() {
-  historyPopover.classList.add('hidden');
+  if (historyPopover) historyPopover.classList.add('hidden');
 }
 
 // --- Trigger Cross-Platform System Notification ---
@@ -339,18 +385,39 @@ function triggerSystemNotification(newRecord) {
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
 
-  const title = 'UpMee 🐰 มีไฟล์/ข้อความใหม่!';
-  const bodyText = newRecord.file_name 
-    ? `อัปโหลดไฟล์ใหม่: ${newRecord.file_name}`
-    : `ข้อความใหม่: ${newRecord.content ? newRecord.content.substring(0, 40) : ''}`;
+  const isFile = newRecord.type === 'file' || newRecord.type === 'both' || Boolean(newRecord.file_name);
+  const isImage = isFile && newRecord.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(newRecord.file_name);
+
+  const title = 'UpMee 🐰';
+  let bodyText = '';
+  let iconUrl = '/bunny_mascot.png';
+  let imageUrl = undefined;
+
+  if (isFile) {
+    bodyText = `ไฟล์ใหม่: ${newRecord.file_name || 'ไฟล์แนบ'}`;
+    if (isImage && newRecord.content) {
+      iconUrl = newRecord.content;
+      imageUrl = newRecord.content;
+    }
+  } else {
+    bodyText = newRecord.content ? newRecord.content.substring(0, 40) : '';
+  }
+
+  const itemTag = 'upmee-share-' + (newRecord.id || newRecord.created_at || 'item');
 
   const options = {
     body: bodyText,
-    icon: '/bunny_mascot.png',
+    icon: iconUrl,
     badge: '/icon-192.png',
     vibrate: [200, 100, 200],
+    tag: itemTag,
+    renotify: false,
     data: newRecord
   };
+
+  if (imageUrl) {
+    options.image = imageUrl;
+  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.ready.then(reg => {
@@ -384,6 +451,8 @@ function initPills() {
 
 // --- Drag & Drop Handlers ---
 function initDropzone() {
+  if (!dropzone) return;
+
   dropzone.addEventListener('click', (e) => {
     if (e.target !== removeFileBtn && !removeFileBtn.contains(e.target)) {
       fileInput.click();
@@ -446,6 +515,8 @@ function handleFileSelection(file) {
 
 // --- Upload Submissions ---
 function initForms() {
+  if (!shareForm) return;
+
   shareForm.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -490,21 +561,25 @@ function initForms() {
     }
   });
 
-  refreshFeedBtn.addEventListener('click', () => {
-    refreshAppFeed();
-    showToast('🔄 Refreshed');
-  });
+  if (refreshFeedBtn) {
+    refreshFeedBtn.addEventListener('click', () => {
+      refreshAppFeed();
+      showToast('🔄 Refreshed');
+    });
+  }
 }
 
 // --- Refresh Cloud Feed & Storage % Bar ---
 async function refreshAppFeed() {
   const { url, key } = getSupabaseConfig();
   if (!url || !key) {
-    liveFeedContainer.innerHTML = `
-      <div class="empty-feed-box">
-        <p>Please configure Supabase credentials in settings ⚙️</p>
-      </div>
-    `;
+    if (liveFeedContainer) {
+      liveFeedContainer.innerHTML = `
+        <div class="empty-feed-box">
+          <p>Please configure Supabase credentials in settings ⚙️</p>
+        </div>
+      `;
+    }
     return;
   }
 
@@ -515,69 +590,105 @@ async function refreshAppFeed() {
     const percentageNum = (totalBytes / TOTAL_CAPACITY) * 100;
     const percentage = percentageNum > 0 && percentageNum < 0.1 ? '0.1%' : `${percentageNum.toFixed(1)}%`;
 
-    if (totalBytes > 0) {
-      storageUsageText.textContent = `${formatBytes(totalBytes)} (${percentage})`;
-    } else {
-      storageUsageText.textContent = `0%`;
+    if (storageUsageText) {
+      if (totalBytes > 0) {
+        storageUsageText.textContent = `${formatBytes(totalBytes)} (${percentage})`;
+      } else {
+        storageUsageText.textContent = `0%`;
+      }
     }
 
-    storageProgressFill.style.width = `${Math.max(0, Math.min(100, percentageNum))}%`;
+    if (storageProgressFill) {
+      storageProgressFill.style.width = `${Math.max(0, Math.min(100, percentageNum))}%`;
+    }
   } catch (err) {
     console.error('Error calculating storage percentage:', err);
   }
 
   // 2. Render Cloud Feed Items
   try {
-    liveFeedContainer.innerHTML = `
-      <div class="loading-spinner-box">
-        <p>Loading...</p>
-      </div>
-    `;
-
-    const sharesList = await getActiveSharesList();
-
-    if (!sharesList || sharesList.length === 0) {
+    if (liveFeedContainer) {
       liveFeedContainer.innerHTML = `
-        <div class="empty-feed-box">
-          <p>☁️ Cloud is empty. Upload a file or message below!</p>
+        <div class="loading-spinner-box">
+          <div class="cloud-loader">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="spin-cloud">
+              <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" stroke="#f472b6" stroke-width="2.2" stroke-dasharray="4 2"/>
+            </svg>
+            <p>Syncing cloud...</p>
+          </div>
         </div>
       `;
+    }
+
+    const sharesList = await getActiveSharesList();
+    const countPill = document.getElementById('cloud-file-count');
+    if (countPill) {
+      const total = sharesList ? sharesList.length : 0;
+      countPill.textContent = `${total} ${total === 1 ? 'item' : 'items'}`;
+    }
+
+    if (!sharesList || sharesList.length === 0) {
+      if (liveFeedContainer) {
+        liveFeedContainer.innerHTML = `
+          <div class="cloud-empty-state">
+            <div class="cloud-empty-graphic">
+              <svg width="64" height="64" viewBox="0 0 24 24" fill="none">
+                <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" fill="url(#emptyCloudGrad)" stroke="#f472b6" stroke-width="1.8" stroke-dasharray="3 3"/>
+                <path d="M12 11v4M12 18h.01" stroke="#f472b6" stroke-width="2" stroke-linecap="round"/>
+                <defs>
+                  <linearGradient id="emptyCloudGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#ffffff"/>
+                    <stop offset="100%" stop-color="#fce7f3"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+            <p class="cloud-empty-title">Cloud is Empty</p>
+            <p class="cloud-empty-desc">No uploaded files yet. Attach a file or type a message below to share to Cloud! ☁️✨</p>
+          </div>
+        `;
+      }
       return;
     }
 
     renderCloudItemBubbles(sharesList);
   } catch (err) {
-    liveFeedContainer.innerHTML = `
-      <div class="empty-feed-box">
-        <p>Error loading items: ${err.message}</p>
-      </div>
-    `;
+    if (liveFeedContainer) {
+      liveFeedContainer.innerHTML = `
+        <div class="empty-feed-box">
+          <p>Error loading items: ${err.message}</p>
+        </div>
+      `;
+    }
   }
 }
 
 // --- Render Sleek Horizontal Rectangle Items ---
 function renderCloudItemBubbles(sharesList) {
+  if (!liveFeedContainer) return;
   liveFeedContainer.innerHTML = '';
 
   sharesList.forEach(item => {
     const cardEl = document.createElement('div');
     cardEl.className = 'cloud-item-row-card';
 
+    const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
     const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
     const isFile = item.type === 'file' || item.type === 'both';
     const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
     // 1. Left Square Thumbnail (Stretch Image edge-to-edge)
     let squareThumbHtml = '';
-    if (isImage && item.content) {
+    if (isImage && fileUrl) {
       squareThumbHtml = `
         <div class="cloud-item-square-thumb" title="Click for large preview">
-          <img src="${item.content}" alt="preview" class="cloud-thumb-img" />
+          <img src="${fileUrl}" alt="preview" class="cloud-thumb-img" />
         </div>
       `;
     } else {
       let icon = '📝';
-      if (isFile) icon = '📁';
+      if (item.type === 'both') icon = '📦';
+      else if (isFile) icon = '📁';
       else if (isUrl) icon = '🔗';
       squareThumbHtml = `
         <div class="cloud-item-square-thumb" title="Click for details">
@@ -587,7 +698,9 @@ function renderCloudItemBubbles(sharesList) {
     }
 
     // 2. Right Info & Timestamps
-    const titleStr = item.file_name || item.content || 'Item';
+    const titleStr = item.file_name 
+      ? (item.type === 'both' ? `${item.file_name} — "${item.content.substring(0, 24)}"` : item.file_name)
+      : (item.content || 'Item');
     const shortUploadTime = formatShortTime(item.created_at);
     const remainingTimePinkStr = formatRemainingTimeClean(item.expires_at);
     const durationBadgeText = calculateConfiguredHoursText(item.created_at, item.expires_at);
@@ -640,7 +753,7 @@ function renderCloudItemBubbles(sharesList) {
           </button>
 
           ${isFile ? `
-            <a href="${item.content}" download="${escapeHtml(item.file_name || 'download')}" class="icon-action-btn quick-save-btn" title="Download">
+            <a href="#" class="icon-action-btn quick-save-btn" title="Download">
               ${downloadSvgIcon}
             </a>
           ` : `
@@ -677,8 +790,10 @@ function renderCloudItemBubbles(sharesList) {
     const quickSaveBtn = cardEl.querySelector('.quick-save-btn');
     if (quickSaveBtn) {
       quickSaveBtn.addEventListener('click', (e) => {
+        e.preventDefault();
         e.stopPropagation();
         markItemAsAccessed(item.id);
+        downloadFileDirectly(fileUrl, item.file_name || 'download');
       });
     }
 
@@ -703,8 +818,34 @@ function renderCloudItemBubbles(sharesList) {
   });
 }
 
+// Helper to download files directly via blob (avoids cross-origin redirect tabs on mobile Safari/Chrome)
+async function downloadFileDirectly(fileUrl, fileNameStr) {
+  try {
+    showToast('⏳ กําลังดาวน์โหลดไฟล์...');
+    const response = await fetch(fileUrl);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const blobUrl = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = blobUrl;
+    a.download = fileNameStr || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    showToast('💾 ดาวน์โหลดไฟล์สำเร็จ!');
+  } catch (err) {
+    console.warn('Direct blob download failed, opening direct URL:', err);
+    window.open(fileUrl, '_blank');
+  }
+}
+
 // --- Item Preview Modal Handlers ---
 function initItemModal() {
+  if (!closeItemModalBtn) return;
   closeItemModalBtn.addEventListener('click', closeItemModal);
   itemModal.addEventListener('click', (e) => {
     if (e.target === itemModal) closeItemModal();
@@ -719,20 +860,25 @@ function initItemModal() {
     }
   });
 
-  modalDownloadBtn.addEventListener('click', () => {
+  modalDownloadBtn.addEventListener('click', (e) => {
+    e.preventDefault();
     if (currentActiveItem) {
-      markItemAsAccessed(currentActiveItem.id);
+      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.content;
+      if (fileUrl) {
+        markItemAsAccessed(currentActiveItem.id);
+        downloadFileDirectly(fileUrl, currentActiveItem.file_name || 'download');
+      }
     }
   });
 
   modalShareBtn.addEventListener('click', () => {
     if (currentActiveItem) {
-      const urlToShare = currentActiveItem.content || window.location.href;
-      openQrModal(urlToShare);
+      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.content;
+      openQrModal(fileUrl || window.location.href);
     }
   });
 
-  modalDeleteBtn.addEventListener('click', async (e) => {
+  modalDeleteBtn.addEventListener('click', async () => {
     if (currentActiveItem && confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
       const res = await deleteShareRecordAndStorage(currentActiveItem.id, currentActiveItem.storage_path);
       if (res.success) {
@@ -748,9 +894,13 @@ function initItemModal() {
 
 function openItemPreviewModal(item) {
   currentActiveItem = item;
+  const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
 
   modalItemBadge.textContent = item.type === 'both' ? 'Message + File' : item.type === 'file' ? 'File' : 'Message / Link';
-  
+  if (modalFileName) {
+    modalFileName.textContent = item.file_name || (item.content ? item.content.substring(0, 30) : 'Item');
+  }
+
   modalPreviewArea.innerHTML = '';
   modalTextContent.classList.add('hidden');
   modalCopyBtn.classList.add('hidden');
@@ -762,8 +912,8 @@ function openItemPreviewModal(item) {
   const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
   // Image Preview Thumbnail inside Modal
-  if (isImage && item.content) {
-    modalPreviewArea.innerHTML = `<img src="${item.content}" alt="preview" class="modal-img-preview" />`;
+  if (isImage && fileUrl) {
+    modalPreviewArea.innerHTML = `<img src="${fileUrl}" alt="preview" class="modal-img-preview" />`;
   } else if (isFile) {
     const fileNameStr = item.file_name || 'File';
     const fileSizeStr = item.file_size ? formatBytes(item.file_size) : '';
@@ -787,9 +937,7 @@ function openItemPreviewModal(item) {
   }
 
   // Download Button for files
-  if (isFile && item.content) {
-    modalDownloadBtn.href = item.content;
-    modalDownloadBtn.download = item.file_name || 'download';
+  if (isFile && fileUrl) {
     modalDownloadBtn.classList.remove('hidden');
   }
 
@@ -797,7 +945,7 @@ function openItemPreviewModal(item) {
 }
 
 function closeItemModal() {
-  itemModal.classList.add('hidden');
+  if (itemModal) itemModal.classList.add('hidden');
   currentActiveItem = null;
 }
 
@@ -808,35 +956,86 @@ function escapeHtml(str) {
   );
 }
 
-// --- QR Modal Handlers ---
+// --- QR Modal Handlers (Pink QR Code + Bunny Mascot Logo + Native Gallery Share) ---
 function initQrModal() {
+  if (!closeQrModalBtn) return;
   closeQrModalBtn.addEventListener('click', closeQrModal);
   qrModal.addEventListener('click', (e) => {
     if (e.target === qrModal) closeQrModal();
   });
+
+  if (qrNativeShareBtn) {
+    qrNativeShareBtn.addEventListener('click', async () => {
+      const urlToShare = (currentActiveItem && currentActiveItem.content) ? currentActiveItem.content : window.location.href;
+      const shareTitle = 'UpMee 🐰';
+      const shareText = (currentActiveItem && currentActiveItem.file_name) 
+        ? `UpMee File: ${currentActiveItem.file_name}`
+        : 'UpMee Share';
+
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: shareTitle,
+            text: shareText,
+            url: urlToShare
+          });
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            showToast(`❌ Share error: ${err.message}`);
+          }
+        }
+      } else {
+        navigator.clipboard.writeText(urlToShare).then(() => {
+          showToast('📋 คัดลอกลิงก์ไปยังคลิปบอร์ดแล้ว!');
+        });
+      }
+    });
+  }
 }
 
 function openQrModal(urlToEncode) {
   QRCode.toCanvas(qrModalCanvas, urlToEncode, {
-    width: 160,
-    margin: 1,
+    width: 200,
+    margin: 2,
     color: {
-      dark: '#7c3aed',
+      dark: '#ec4899', // Pink theme color!
       light: '#ffffff'
     }
   }, (err) => {
-    if (err) console.error('QR code error:', err);
+    if (err) {
+      console.error('QR code error:', err);
+      return;
+    }
+
+    // Draw Bunny mascot logo in the center of the QR Code
+    const ctx = qrModalCanvas.getContext('2d');
+    const logo = new Image();
+    logo.src = '/bunny_mascot.png';
+    logo.onload = () => {
+      const logoSize = qrModalCanvas.width * 0.24; // 24% width of QR
+      const center = (qrModalCanvas.width - logoSize) / 2;
+
+      // Draw white background circle behind logo
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(qrModalCanvas.width / 2, qrModalCanvas.height / 2, logoSize / 2 + 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw Bunny Logo Image
+      ctx.drawImage(logo, center, center, logoSize, logoSize);
+    };
   });
 
   qrModal.classList.remove('hidden');
 }
 
 function closeQrModal() {
-  qrModal.classList.add('hidden');
+  if (qrModal) qrModal.classList.add('hidden');
 }
 
 // --- Settings Modal Handlers ---
 function initSettingsModal() {
+  if (!settingsBtn) return;
   settingsBtn.addEventListener('click', openSettingsModal);
   closeModalBtn.addEventListener('click', closeModalBtnHandler);
 
@@ -860,13 +1059,13 @@ function initSettingsModal() {
 
 function openSettingsModal() {
   const { url, key } = getSupabaseConfig();
-  cfgUrl.value = url;
-  cfgKey.value = key;
-  configModal.classList.remove('hidden');
+  if (cfgUrl) cfgUrl.value = url;
+  if (cfgKey) cfgKey.value = key;
+  if (configModal) configModal.classList.remove('hidden');
 }
 
 function closeModalBtnHandler() {
-  configModal.classList.add('hidden');
+  if (configModal) configModal.classList.add('hidden');
 }
 
 // --- PWA Installation & Service Worker ---
@@ -882,17 +1081,19 @@ function initPWA() {
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPwaPrompt = e;
-    pwaInstallBtn.classList.remove('hidden');
+    if (pwaInstallBtn) pwaInstallBtn.classList.remove('hidden');
   });
 
-  pwaInstallBtn.addEventListener('click', async () => {
-    if (deferredPwaPrompt) {
-      deferredPwaPrompt.prompt();
-      const { outcome } = await deferredPwaPrompt.userChoice;
-      if (outcome === 'accepted') {
-        pwaInstallBtn.classList.add('hidden');
+  if (pwaInstallBtn) {
+    pwaInstallBtn.addEventListener('click', async () => {
+      if (deferredPwaPrompt) {
+        deferredPwaPrompt.prompt();
+        const { outcome } = await deferredPwaPrompt.userChoice;
+        if (outcome === 'accepted') {
+          pwaInstallBtn.classList.add('hidden');
+        }
+        deferredPwaPrompt = null;
       }
-      deferredPwaPrompt = null;
-    }
-  });
+    });
+  }
 }
