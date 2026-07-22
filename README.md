@@ -9,6 +9,10 @@
 
 > A secure, lightweight, cross-platform Progressive Web Application (PWA) designed for frictionless file, link, and text sharing across Windows, Android, iOS, and iPadOS devices without cumbersome logins or bluetooth constraints.
 
+<p align="center">
+  <img src="public/app_preview.png" alt="UpMee Application Preview" width="400" />
+</p>
+
 ---
 
 ## ✨ Key Features & Problem Solved
