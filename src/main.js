@@ -1,10 +1,12 @@
 import QRCode from 'qrcode';
+import JSZip from 'jszip';
 import {
   getSupabaseConfig,
   saveSupabaseConfig,
-  createShareItem,
+  createMultipleShareItems,
   getActiveSharesList,
   deleteShareRecordAndStorage,
+  batchDeleteShares,
   getStorageUsageInfo,
   subscribeToRealtimeUploads,
   savePushSubscription,
@@ -31,10 +33,13 @@ function markItemAsAccessed(id) {
 }
 
 // Application State
-let selectedFile = null;
+let selectedFiles = []; // Array of File objects
 let selectedDurationKey = '24h'; // Default '24h'
 let deferredPwaPrompt = null;
 let currentActiveItem = null;
+let isSelectMode = false;
+let selectedShareIds = new Set();
+let currentSharesList = [];
 
 // DOM Elements
 const historyBtn = document.getElementById('history-btn');
@@ -47,10 +52,13 @@ const pillBtns = document.querySelectorAll('.pill-btn');
 const textContent = document.getElementById('text-content');
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
+const dropzoneEmptyContent = document.getElementById('dropzone-empty-content');
 const filePreview = document.getElementById('file-preview');
-const fileName = document.getElementById('file-name');
-const fileSize = document.getElementById('file-size');
-const removeFileBtn = document.getElementById('remove-file-btn');
+const selectedFilesList = document.getElementById('selected-files-list');
+const addMoreFilesBtn = document.getElementById('add-more-files-btn');
+const clearAllFilesBtn = document.getElementById('clear-all-files-btn');
+const queueTotalSize = document.getElementById('queue-total-size');
+const queueFileCountBadge = document.getElementById('queue-file-count-badge');
 
 const shareForm = document.getElementById('share-form');
 const submitShareBtn = document.getElementById('submit-share-btn');
@@ -60,6 +68,16 @@ const storageProgressFill = document.getElementById('storage-progress-fill');
 
 const liveFeedContainer = document.getElementById('live-feed-container');
 const refreshFeedBtn = document.getElementById('refresh-feed-btn');
+const toggleSelectModeBtn = document.getElementById('toggle-select-mode-btn');
+const downloadAllBtn = document.getElementById('download-all-btn');
+
+const batchActionsBar = document.getElementById('batch-actions-bar');
+const batchSelectAllCb = document.getElementById('batch-select-all-cb');
+const batchSelectedCount = document.getElementById('batch-selected-count');
+const batchDownloadZipBtn = document.getElementById('batch-download-zip-btn');
+const batchDownloadSeparateBtn = document.getElementById('batch-download-separate-btn');
+const batchDeleteBtn = document.getElementById('batch-delete-btn');
+const batchCancelBtn = document.getElementById('batch-cancel-btn');
 
 const settingsBtn = document.getElementById('settings-btn');
 const configModal = document.getElementById('config-modal');
@@ -94,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initPills();
   initDropzone();
   initForms();
+  initBatchActions();
   initSettingsModal();
   initItemModal();
   initQrModal();
@@ -127,16 +146,38 @@ async function checkSharedDataFromGallery() {
       await cache.delete('/shared-text');
     }
 
-    // Check shared file from gallery app
-    const fileRes = await cache.match('/shared-file');
-    if (fileRes) {
-      const blob = await fileRes.blob();
-      const rawFileName = fileRes.headers.get('x-file-name') ? decodeURIComponent(fileRes.headers.get('x-file-name')) : 'shared_image.jpg';
-      const sharedFile = new File([blob], rawFileName, { type: blob.type || 'image/jpeg' });
-      
-      handleFileSelection(sharedFile);
-      await cache.delete('/shared-file');
-      showToast('📷 Image loaded from Gallery share!');
+    // Check shared files from gallery app
+    const countRes = await cache.match('/shared-files-count');
+    if (countRes) {
+      const count = parseInt(await countRes.text(), 10) || 0;
+      const loadedFiles = [];
+      for (let i = 0; i < count; i++) {
+        const fileRes = await cache.match(`/shared-file-${i}`);
+        if (fileRes) {
+          const blob = await fileRes.blob();
+          const rawFileName = fileRes.headers.get('x-file-name') ? decodeURIComponent(fileRes.headers.get('x-file-name')) : `shared_image_${i + 1}.jpg`;
+          const sharedFile = new File([blob], rawFileName, { type: blob.type || 'image/jpeg' });
+          loadedFiles.push(sharedFile);
+          await cache.delete(`/shared-file-${i}`);
+        }
+      }
+      await cache.delete('/shared-files-count');
+      if (loadedFiles.length > 0) {
+        handleFilesSelection(loadedFiles);
+        showToast(`📷 ${loadedFiles.length} file(s) loaded from Gallery share!`);
+      }
+    } else {
+      // Legacy single shared file fallback
+      const fileRes = await cache.match('/shared-file');
+      if (fileRes) {
+        const blob = await fileRes.blob();
+        const rawFileName = fileRes.headers.get('x-file-name') ? decodeURIComponent(fileRes.headers.get('x-file-name')) : 'shared_image.jpg';
+        const sharedFile = new File([blob], rawFileName, { type: blob.type || 'image/jpeg' });
+        
+        handleFilesSelection([sharedFile]);
+        await cache.delete('/shared-file');
+        showToast('📷 Image loaded from Gallery share!');
+      }
     }
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -449,21 +490,42 @@ function initPills() {
   });
 }
 
-// --- Drag & Drop Handlers ---
+// --- Multi-File Selection & Dropzone Handlers ---
 function initDropzone() {
   if (!dropzone) return;
 
   dropzone.addEventListener('click', (e) => {
-    if (e.target !== removeFileBtn && !removeFileBtn.contains(e.target)) {
-      fileInput.click();
+    // Prevent triggering file input when clicking queue buttons
+    if (
+      e.target.closest('#add-more-files-btn') ||
+      e.target.closest('#clear-all-files-btn') ||
+      e.target.closest('.selected-file-remove-btn')
+    ) {
+      return;
     }
+    fileInput.click();
   });
 
   fileInput.addEventListener('change', (e) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileSelection(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFilesSelection(Array.from(e.target.files));
+      fileInput.value = ''; // Reset input to allow re-selection of the same files if needed
     }
   });
+
+  if (addMoreFilesBtn) {
+    addMoreFilesBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.click();
+    });
+  }
+
+  if (clearAllFilesBtn) {
+    clearAllFilesBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearAllQueuedFiles();
+    });
+  }
 
   ['dragenter', 'dragover'].forEach(eventName => {
     dropzone.addEventListener(eventName, (e) => {
@@ -484,33 +546,117 @@ function initDropzone() {
   dropzone.addEventListener('drop', (e) => {
     const dt = e.dataTransfer;
     const files = dt.files;
-    if (files && files[0]) {
-      handleFileSelection(files[0]);
+    if (files && files.length > 0) {
+      handleFilesSelection(Array.from(files));
     }
-  });
-
-  removeFileBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    selectedFile = null;
-    fileInput.value = '';
-    filePreview.classList.add('hidden');
-    dropzone.querySelector('.dropzone-content').classList.remove('hidden');
   });
 }
 
-function handleFileSelection(file) {
+function handleFilesSelection(newFiles) {
   const MAX_SIZE = 50 * 1024 * 1024; // 50MB
-  if (file.size > MAX_SIZE) {
-    showToast('❌ ไฟล์มีขนาดเกิน 50MB ไม่สามารถอัปโหลดได้น้า');
+  let oversizedCount = 0;
+  let addedCount = 0;
+
+  newFiles.forEach(file => {
+    if (file.size > MAX_SIZE) {
+      oversizedCount++;
+      return;
+    }
+
+    // Deduplicate against existing queued files (by name, size, and lastModified)
+    const isDuplicate = selectedFiles.some(
+      existing => existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified
+    );
+
+    if (!isDuplicate) {
+      selectedFiles.push(file);
+      addedCount++;
+    }
+  });
+
+  if (oversizedCount > 0) {
+    showToast(`⚠️ ข้าม ${oversizedCount} ไฟล์ที่มีขนาดเกิน 50MB`);
+  }
+
+  renderSelectedFilesQueue();
+}
+
+function removeFileFromQueue(index) {
+  if (index >= 0 && index < selectedFiles.length) {
+    selectedFiles.splice(index, 1);
+    renderSelectedFilesQueue();
+  }
+}
+
+function clearAllQueuedFiles() {
+  selectedFiles = [];
+  renderSelectedFilesQueue();
+}
+
+function renderSelectedFilesQueue() {
+  if (!filePreview || !dropzoneEmptyContent || !selectedFilesList) return;
+
+  if (selectedFiles.length === 0) {
+    filePreview.classList.add('hidden');
+    dropzoneEmptyContent.classList.remove('hidden');
+    if (queueFileCountBadge) queueFileCountBadge.classList.add('hidden');
     return;
   }
 
-  selectedFile = file;
-  fileName.textContent = file.name;
-  fileSize.textContent = formatBytes(file.size);
-
-  dropzone.querySelector('.dropzone-content').classList.add('hidden');
+  dropzoneEmptyContent.classList.add('hidden');
   filePreview.classList.remove('hidden');
+
+  if (queueFileCountBadge) {
+    queueFileCountBadge.textContent = `${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''}`;
+    queueFileCountBadge.classList.remove('hidden');
+  }
+
+  const totalBytes = selectedFiles.reduce((acc, f) => acc + f.size, 0);
+  if (queueTotalSize) {
+    queueTotalSize.textContent = `(${formatBytes(totalBytes)})`;
+  }
+
+  selectedFilesList.innerHTML = '';
+
+  selectedFiles.forEach((file, index) => {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'selected-file-row';
+
+    const isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(file.name);
+    let thumbHtml = '';
+
+    if (isImage) {
+      const blobUrl = URL.createObjectURL(file);
+      thumbHtml = `<img src="${blobUrl}" alt="thumb" class="selected-file-thumb" />`;
+    } else {
+      let icon = '📄';
+      if (/\.(pdf)$/i.test(file.name)) icon = '📕';
+      else if (/\.(zip|rar|7z|tar|gz)$/i.test(file.name)) icon = '📦';
+      else if (/\.(mp4|mov|avi|mkv)$/i.test(file.name)) icon = '🎬';
+      else if (/\.(mp3|wav|ogg|m4a)$/i.test(file.name)) icon = '🎵';
+      else if (/\.(docx?|xlsx?|pptx?)$/i.test(file.name)) icon = '📊';
+      thumbHtml = `<span class="selected-file-icon">${icon}</span>`;
+    }
+
+    rowEl.innerHTML = `
+      <div class="selected-file-left">
+        ${thumbHtml}
+        <div class="selected-file-meta">
+          <span class="selected-file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+          <span class="selected-file-size">${formatBytes(file.size)}</span>
+        </div>
+      </div>
+      <button type="button" class="selected-file-remove-btn" data-index="${index}" title="Remove file">&times;</button>
+    `;
+
+    const removeBtn = rowEl.querySelector('.selected-file-remove-btn');
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeFileFromQueue(index);
+    });
+
+    selectedFilesList.appendChild(rowEl);
+  });
 }
 
 // --- Upload Submissions ---
@@ -528,29 +674,37 @@ function initForms() {
     }
 
     const textVal = textContent.value.trim();
-    if (!textVal && !selectedFile) {
+    if (!textVal && selectedFiles.length === 0) {
       showToast('⚠️ กรุณาพิมพ์ข้อความ/ลิงก์ หรือแนบไฟล์อย่างน้อย 1 อย่างนะจ๊ะ');
       return;
     }
+
+    const totalToUpload = selectedFiles.length;
 
     try {
       submitShareBtn.disabled = true;
       submitShareBtn.innerHTML = `<span>⏳ Uploading...</span>`;
 
-      await createShareItem({
+      await createMultipleShareItems({
         textContent: textVal,
-        file: selectedFile,
-        durationKey: selectedDurationKey
+        files: selectedFiles,
+        durationKey: selectedDurationKey,
+        onProgress: ({ completed, total }) => {
+          if (submitShareBtn) {
+            submitShareBtn.innerHTML = `<span>⏳ Uploading (${completed}/${total})...</span>`;
+          }
+        }
       });
 
-      showToast('🎉 Upload Complete!');
+      if (totalToUpload > 1) {
+        showToast(`🎉 Uploaded ${totalToUpload} files successfully!`);
+      } else {
+        showToast('🎉 Upload Complete!');
+      }
 
-      // Clear fields
+      // Clear form & queue
       textContent.value = '';
-      selectedFile = null;
-      fileInput.value = '';
-      filePreview.classList.add('hidden');
-      dropzone.querySelector('.dropzone-content').classList.remove('hidden');
+      clearAllQueuedFiles();
 
       await refreshAppFeed();
     } catch (err) {
@@ -566,6 +720,240 @@ function initForms() {
       refreshAppFeed();
       showToast('🔄 Refreshed');
     });
+  }
+}
+
+// --- Multi-Download & Batch Actions ---
+function initBatchActions() {
+  if (toggleSelectModeBtn) {
+    toggleSelectModeBtn.addEventListener('click', () => {
+      setSelectMode(!isSelectMode);
+    });
+  }
+
+  if (downloadAllBtn) {
+    downloadAllBtn.addEventListener('click', () => {
+      downloadAllAsZip();
+    });
+  }
+
+  if (batchSelectAllCb) {
+    batchSelectAllCb.addEventListener('change', () => {
+      if (batchSelectAllCb.checked) {
+        currentSharesList.forEach(item => selectedShareIds.add(item.id));
+      } else {
+        selectedShareIds.clear();
+      }
+      updateBatchUI();
+    });
+  }
+
+  if (batchCancelBtn) {
+    batchCancelBtn.addEventListener('click', () => {
+      setSelectMode(false);
+    });
+  }
+
+  if (batchDownloadZipBtn) {
+    batchDownloadZipBtn.addEventListener('click', () => {
+      downloadSelectedAsZip();
+    });
+  }
+
+  if (batchDownloadSeparateBtn) {
+    batchDownloadSeparateBtn.addEventListener('click', () => {
+      downloadSelectedConcurrently();
+    });
+  }
+
+  if (batchDeleteBtn) {
+    batchDeleteBtn.addEventListener('click', async () => {
+      await batchDeleteSelected();
+    });
+  }
+}
+
+function setSelectMode(enable) {
+  isSelectMode = enable;
+  if (toggleSelectModeBtn) {
+    toggleSelectModeBtn.classList.toggle('active', isSelectMode);
+  }
+
+  if (!isSelectMode) {
+    selectedShareIds.clear();
+    if (batchActionsBar) batchActionsBar.classList.add('hidden');
+  } else {
+    if (batchActionsBar) batchActionsBar.classList.remove('hidden');
+  }
+
+  updateBatchUI();
+  renderCloudItemBubbles(currentSharesList);
+}
+
+function updateBatchUI() {
+  const selectedCount = selectedShareIds.size;
+  if (batchSelectedCount) {
+    batchSelectedCount.textContent = `${selectedCount} selected`;
+  }
+
+  if (batchSelectAllCb) {
+    batchSelectAllCb.checked = currentSharesList.length > 0 && selectedCount === currentSharesList.length;
+    batchSelectAllCb.indeterminate = selectedCount > 0 && selectedCount < currentSharesList.length;
+  }
+
+  // Update card selected highlights & checkboxes in DOM
+  const cards = document.querySelectorAll('.cloud-item-row-card');
+  cards.forEach(card => {
+    const id = card.getAttribute('data-id');
+    const isSelected = selectedShareIds.has(id);
+    card.classList.toggle('selected', isSelected);
+    const cb = card.querySelector('.cloud-item-select-checkbox');
+    if (cb) cb.checked = isSelected;
+  });
+}
+
+// Download All active files as single ZIP
+async function downloadAllAsZip() {
+  const fileItems = currentSharesList.filter(item => item.storage_path || item.content);
+  if (!fileItems || fileItems.length === 0) {
+    showToast('⚠️ ไม่มีไฟล์สำหรับดาวน์โหลด');
+    return;
+  }
+  const dateStr = new Date().toISOString().slice(0, 10);
+  await downloadFilesAsZip(fileItems, `UpMee_All_Files_${dateStr}.zip`);
+}
+
+// Download Selected items as ZIP
+async function downloadSelectedAsZip() {
+  const selectedItems = currentSharesList.filter(item => selectedShareIds.has(item.id));
+  if (selectedItems.length === 0) {
+    showToast('⚠️ กรุณาเลือกรายการที่ต้องการดาวน์โหลดก่อน');
+    return;
+  }
+  const dateStr = new Date().toISOString().slice(0, 10);
+  await downloadFilesAsZip(selectedItems, `UpMee_Selected_${dateStr}.zip`);
+}
+
+// Download Selected items as concurrent individual files
+async function downloadSelectedConcurrently() {
+  const selectedItems = currentSharesList.filter(item => selectedShareIds.has(item.id));
+  if (selectedItems.length === 0) {
+    showToast('⚠️ กรุณาเลือกรายการที่ต้องการดาวน์โหลดก่อน');
+    return;
+  }
+  await downloadFilesConcurrently(selectedItems);
+}
+
+// Batch Delete Selected items
+async function batchDeleteSelected() {
+  const selectedItems = currentSharesList.filter(item => selectedShareIds.has(item.id));
+  if (selectedItems.length === 0) {
+    showToast('⚠️ กรุณาเลือกรายการที่ต้องการลบก่อน');
+    return;
+  }
+
+  if (confirm(`คุณต้องการลบ ${selectedItems.length} รายการที่เลือกใช่หรือไม่?`)) {
+    showToast('⏳ กำลังลบรายการ...');
+    const res = await batchDeleteShares(selectedItems);
+    if (res.success) {
+      showToast(`🗑️ ลบ ${selectedItems.length} รายการเรียบร้อยแล้ว!`);
+      selectedShareIds.clear();
+      setSelectMode(false);
+      await refreshAppFeed();
+    } else {
+      showToast(`❌ ลบไม่สำเร็จ: ${res.error || 'Permission error'}`);
+    }
+  }
+}
+
+// Robust JSZip file archiver with concurrency and progress
+async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.zip') {
+  try {
+    showToast(`⏳ กำลังเตรียมและบีบอัด ${itemsToDownload.length} รายการ...`);
+    const zip = new JSZip();
+    const usedNames = new Map();
+
+    const fetchPromises = itemsToDownload.map(async (item, index) => {
+      const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
+      const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
+
+      if (isFile && fileUrl) {
+        try {
+          const res = await fetch(fileUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const blob = await res.blob();
+
+          let fileNameStr = item.file_name || `file_${index + 1}`;
+          // Handle duplicate file names in ZIP
+          if (usedNames.has(fileNameStr)) {
+            const count = usedNames.get(fileNameStr) + 1;
+            usedNames.set(fileNameStr, count);
+            const extDot = fileNameStr.lastIndexOf('.');
+            if (extDot > 0) {
+              fileNameStr = `${fileNameStr.slice(0, extDot)}_${count}${fileNameStr.slice(extDot)}`;
+            } else {
+              fileNameStr = `${fileNameStr}_${count}`;
+            }
+          } else {
+            usedNames.set(fileNameStr, 1);
+          }
+
+          zip.file(fileNameStr, blob);
+          markItemAsAccessed(item.id);
+        } catch (fetchErr) {
+          console.warn(`Failed to fetch file for ZIP (${item.file_name}):`, fetchErr);
+        }
+      } else if (item.content) {
+        // For text-only items, bundle as .txt notes inside the zip
+        let textName = `note_${index + 1}.txt`;
+        zip.file(textName, item.content);
+        markItemAsAccessed(item.id);
+      }
+    });
+
+    await Promise.all(fetchPromises);
+
+    showToast('📦 กำลังสร้างไฟล์ ZIP...');
+    const zipBlob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
+
+    const blobUrl = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = blobUrl;
+    a.download = zipFileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    showToast('💾 ดาวน์โหลด ZIP สำเร็จเรียบร้อย!');
+  } catch (err) {
+    console.error('ZIP generation error:', err);
+    showToast(`❌ สร้างไฟล์ ZIP ไม่สำเร็จ: ${err.message}`);
+  }
+}
+
+// Download multiple files concurrently via staggered blob triggers
+async function downloadFilesConcurrently(itemsToDownload) {
+  showToast(`⚡ กำลังดาวน์โหลด ${itemsToDownload.length} ไฟล์พร้อมกัน...`);
+
+  for (let i = 0; i < itemsToDownload.length; i++) {
+    const item = itemsToDownload[i];
+    const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
+    const fileNameStr = item.file_name || `download_${i + 1}`;
+
+    if (fileUrl) {
+      markItemAsAccessed(item.id);
+      downloadFileDirectly(fileUrl, fileNameStr);
+      // Small 150ms delay between download triggers to prevent browser popup blockers on mobile & desktop
+      if (i < itemsToDownload.length - 1) {
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
   }
 }
 
@@ -621,13 +1009,15 @@ async function refreshAppFeed() {
     }
 
     const sharesList = await getActiveSharesList();
+    currentSharesList = sharesList || [];
+
     const countPill = document.getElementById('cloud-file-count');
     if (countPill) {
-      const total = sharesList ? sharesList.length : 0;
+      const total = currentSharesList.length;
       countPill.textContent = `${total} ${total === 1 ? 'item' : 'items'}`;
     }
 
-    if (!sharesList || sharesList.length === 0) {
+    if (!currentSharesList || currentSharesList.length === 0) {
       if (liveFeedContainer) {
         liveFeedContainer.innerHTML = `
           <div class="cloud-empty-state">
@@ -644,14 +1034,16 @@ async function refreshAppFeed() {
               </svg>
             </div>
             <p class="cloud-empty-title">Cloud is Empty</p>
-            <p class="cloud-empty-desc">No uploaded files yet. Attach a file or type a message below to share to Cloud! ☁️✨</p>
+            <p class="cloud-empty-desc">No uploaded files yet. Attach files or type a message below to share to Cloud! ☁️✨</p>
           </div>
         `;
       }
+      if (isSelectMode) setSelectMode(false);
       return;
     }
 
-    renderCloudItemBubbles(sharesList);
+    renderCloudItemBubbles(currentSharesList);
+    updateBatchUI();
   } catch (err) {
     if (liveFeedContainer) {
       liveFeedContainer.innerHTML = `
@@ -670,14 +1062,25 @@ function renderCloudItemBubbles(sharesList) {
 
   sharesList.forEach(item => {
     const cardEl = document.createElement('div');
-    cardEl.className = 'cloud-item-row-card';
+    cardEl.className = `cloud-item-row-card ${selectedShareIds.has(item.id) ? 'selected' : ''}`;
+    cardEl.setAttribute('data-id', item.id);
 
     const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
     const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
     const isFile = item.type === 'file' || item.type === 'both';
     const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
-    // 1. Left Square Thumbnail (Stretch Image edge-to-edge)
+    // 0. Select Checkbox (if in select mode)
+    let checkboxHtml = '';
+    if (isSelectMode) {
+      checkboxHtml = `
+        <div class="cloud-item-checkbox-container">
+          <input type="checkbox" class="custom-checkbox cloud-item-select-checkbox" ${selectedShareIds.has(item.id) ? 'checked' : ''} />
+        </div>
+      `;
+    }
+
+    // 1. Left Square Thumbnail
     let squareThumbHtml = '';
     if (isImage && fileUrl) {
       squareThumbHtml = `
@@ -729,10 +1132,13 @@ function renderCloudItemBubbles(sharesList) {
     `;
 
     cardEl.innerHTML = `
+      <!-- Checkbox when in Multi-Select Mode -->
+      ${checkboxHtml}
+
       <!-- Top-Right Duration Hours Badge -->
       <span class="cloud-item-duration-badge">${durationBadgeText}</span>
 
-      <!-- Left Square Thumbnail (Clickable) -->
+      <!-- Left Square Thumbnail -->
       ${squareThumbHtml}
 
       <!-- Right Info Area -->
@@ -765,13 +1171,28 @@ function renderCloudItemBubbles(sharesList) {
       </div>
     `;
 
-    // Click on Left Square Thumbnail -> Opens Large Popup Modal
-    const squareThumbEl = cardEl.querySelector('.cloud-item-square-thumb');
-    if (squareThumbEl) {
-      squareThumbEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openItemPreviewModal(item);
+    // Multi-Select Card Click Handler
+    if (isSelectMode) {
+      cardEl.addEventListener('click', (e) => {
+        if (e.target.closest('.quick-delete-btn') || e.target.closest('.quick-save-btn') || e.target.closest('.quick-copy-btn')) {
+          return;
+        }
+        if (selectedShareIds.has(item.id)) {
+          selectedShareIds.delete(item.id);
+        } else {
+          selectedShareIds.add(item.id);
+        }
+        updateBatchUI();
       });
+    } else {
+      // Click on Left Square Thumbnail -> Opens Large Popup Modal
+      const squareThumbEl = cardEl.querySelector('.cloud-item-square-thumb');
+      if (squareThumbEl) {
+        squareThumbEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openItemPreviewModal(item);
+        });
+      }
     }
 
     // Quick Copy button

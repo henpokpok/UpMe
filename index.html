@@ -134,13 +134,68 @@
             </div>
           </div>
 
-          <button id="refresh-feed-btn" class="cloud-refresh-btn" title="Refresh Cloud Feed">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="23 4 23 10 17 10"/>
-              <polyline points="1 20 1 14 7 14"/>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-            </svg>
-          </button>
+          <div class="cloud-header-actions">
+            <!-- Multi-Select Mode Toggle Button -->
+            <button id="toggle-select-mode-btn" class="cloud-action-btn" title="Select Multiple Items">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 11 12 14 22 4"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
+              <span class="action-btn-text">Select</span>
+            </button>
+
+            <!-- Download All as ZIP Button -->
+            <button id="download-all-btn" class="cloud-action-btn" title="Download All Files as ZIP">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span class="action-btn-text">Zip All</span>
+            </button>
+
+            <!-- Refresh Button -->
+            <button id="refresh-feed-btn" class="cloud-refresh-btn" title="Refresh Cloud Feed">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Floating Batch Action Toolbar (Visible when selecting items) -->
+        <div id="batch-actions-bar" class="batch-actions-bar hidden">
+          <div class="batch-info-area">
+            <label class="batch-select-all-label">
+              <input type="checkbox" id="batch-select-all-cb" class="custom-checkbox" />
+              <span id="batch-selected-count" class="batch-count-text">0 selected</span>
+            </label>
+          </div>
+          <div class="batch-buttons-group">
+            <button type="button" id="batch-download-zip-btn" class="batch-btn batch-btn-zip" title="Download Selected as ZIP">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              <span>Download ZIP</span>
+            </button>
+            <button type="button" id="batch-download-separate-btn" class="batch-btn batch-btn-separate" title="Download Each File Concurrently">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+              <span>Parallel</span>
+            </button>
+            <button type="button" id="batch-delete-btn" class="batch-btn batch-btn-danger" title="Delete Selected Items">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+            <button type="button" id="batch-cancel-btn" class="batch-btn-close" title="Cancel Selection">&times;</button>
+          </div>
         </div>
 
         <!-- Cloud Content Grid -->
@@ -167,10 +222,14 @@
           </div>
 
           <div class="form-group">
-            <label>แนบไฟล์ ไม่เกิน 50MB</label>
+            <div class="label-with-count">
+              <label>แนบไฟล์ (เลือกได้หลายไฟล์ ไม่เกิน 50MB ต่อไฟล์)</label>
+              <span id="queue-file-count-badge" class="queue-badge hidden">0 files</span>
+            </div>
             <div id="dropzone" class="file-dropzone cloud-look-dropzone">
-              <input type="file" id="file-input" class="hidden-file-input" />
-              <div class="dropzone-content">
+              <input type="file" id="file-input" class="hidden-file-input" multiple />
+              
+              <div id="dropzone-empty-content" class="dropzone-content">
                 <div class="cloud-dropzone-icon">
                   <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" fill="url(#cloudGrad)" stroke="var(--accent-pink)"/>
@@ -185,18 +244,24 @@
                     </defs>
                   </svg>
                 </div>
-                <p class="dropzone-title">อัพโหลดไฟล์</p>
-                <p class="dropzone-subtitle">รองรับรูปภาพ เอกสาร วิดีโอ ไม่เกิน 50MB</p>
+                <p class="dropzone-title">อัพโหลดไฟล์ (เลือกได้หลายไฟล์)</p>
+                <p class="dropzone-subtitle">คลิกหรือลากไฟล์มาวางพร้อมกันได้ ไม่เกิน 50MB/ไฟล์</p>
               </div>
-              <div id="file-preview" class="file-preview hidden">
-                <div class="file-info">
-                  <span class="file-icon-badge">📄</span>
-                  <div class="file-meta">
-                    <span id="file-name" class="file-name">filename.pdf</span>
-                    <span id="file-size" class="file-size">2.4 MB</span>
+
+              <!-- Multi-file preview container -->
+              <div id="file-preview" class="file-preview-queue hidden">
+                <div class="queue-header">
+                  <div class="queue-summary">
+                    <span class="queue-title-text">📂 Selected Files</span>
+                    <span id="queue-total-size" class="queue-size-text">0 MB</span>
+                  </div>
+                  <div class="queue-actions">
+                    <button type="button" id="add-more-files-btn" class="queue-action-link" title="Add More Files">+ Add more</button>
+                    <button type="button" id="clear-all-files-btn" class="queue-action-link danger" title="Clear All Files">Clear all</button>
                   </div>
                 </div>
-                <button type="button" id="remove-file-btn" class="icon-btn-danger" title="Remove">&times;</button>
+                
+                <div id="selected-files-list" class="selected-files-list"></div>
               </div>
             </div>
           </div>

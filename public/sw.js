@@ -27,15 +27,29 @@ self.addEventListener('fetch', (event) => {
     event.respondWith((async () => {
       try {
         const formData = await event.request.formData();
-        const file = formData.get('file');
+        const files = formData.getAll('file') || [];
+        const singleFile = formData.get('file');
         const text = formData.get('text') || formData.get('title') || formData.get('url');
 
         const cache = await caches.open('upmee-shared-data');
-        if (file) {
-          await cache.put('/shared-file', new Response(file, {
+        if (files.length > 0) {
+          // Store count and each file
+          await cache.put('/shared-files-count', new Response(String(files.length)));
+          for (let i = 0; i < files.length; i++) {
+            const f = files[i];
+            await cache.put(`/shared-file-${i}`, new Response(f, {
+              headers: {
+                'x-file-name': encodeURIComponent(f.name),
+                'content-type': f.type || 'image/jpeg'
+              }
+            }));
+          }
+        } else if (singleFile) {
+          await cache.put('/shared-files-count', new Response('1'));
+          await cache.put('/shared-file-0', new Response(singleFile, {
             headers: {
-              'x-file-name': encodeURIComponent(file.name),
-              'content-type': file.type || 'image/jpeg'
+              'x-file-name': encodeURIComponent(singleFile.name),
+              'content-type': singleFile.type || 'image/jpeg'
             }
           }));
         }

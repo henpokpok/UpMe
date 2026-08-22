@@ -93,87 +93,45 @@ export async function savePushSubscription(subscription) {
 }
 
 /**
- * Create a new share item (supports text, file, or both text + file)
+ * Create a new share item (single file or text)
  */
 export async function createShareItem({ textContent, file, durationKey }) {
+  const items = await createMultipleShareItems({
+    textContent,
+    files: file ? [file] : [],
+    durationKey
+  });
+  return items[0];
+}
+
+/**
+ * Upload multiple files (and optional text) with concurrency and progress reporting
+ */
+export async function createMultipleShareItems({ textContent, files = [], durationKey, onProgress }) {
   const supabase = getSupabaseClient();
   if (!supabase) {
     throw new Error('กรุณาตั้งค่า Supabase URL และ Anon Key ในเมนูตั้งค่าก่อนใช้งานนะจ๊ะ');
   }
 
-  const passcode = generatePasscode();
   const expiresAt = calculateExpirationISO(durationKey);
+  const MAX_SIZE = 50 * 1024 * 1024; // 50MB per file
 
-  let publicUrl = null;
-  let storagePath = null;
-  let fileName = null;
-  let fileSize = null;
-  let type = 'text';
-
-  // 1. Upload File if attached
-  if (file) {
-    const MAX_SIZE = 50 * 1024 * 1024; // 50MB
-    if (file.size > MAX_SIZE) {
-      throw new Error('ไฟล์มีขนาดเกิน 50MB ไม่สามารถอัปโหลดได้น้า');
+  // Case 1: Only text content, no files attached
+  if (!files || files.length === 0) {
+    if (!textContent) {
+      throw new Error('กรุณาระบุข้อความหรือเลือกไฟล์อย่างน้อย 1 อย่าง');
     }
-
-    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-    storagePath = `uploads/${Date.now()}_${sanitizedFileName}`;
-
-    const { error: uploadError } = await supabase
-      .storage
-      .from('user-shares')
-      .upload(storagePath, file, { cacheControl: '3600', upsert: false });
-
-    if (uploadError) {
-      throw new Error(`อัปโหลดไฟล์ไม่สำเร็จ: ${uploadError.message}`);
-    }
-
-    const { data: publicUrlData } = supabase
-      .storage
-      .from('user-shares')
-      .getPublicUrl(storagePath);
-
-    publicUrl = publicUrlData.publicUrl;
-    fileName = file.name;
-    fileSize = file.size;
-    type = textContent ? 'both' : 'file';
-  }
-
-  // If text is provided, content stores the text; if only file, content stores the publicUrl
-  const finalContent = textContent ? textContent : (publicUrl || '');
-
-  // 2. Insert record into database with automatic constraint fallback
-  let { data, error: dbError } = await supabase
-    .from('shares')
-    .insert([
-      {
-        code: passcode,
-        type: type,
-        content: finalContent,
-        storage_path: storagePath,
-        file_name: fileName,
-        file_size: fileSize,
-        one_time_download: false,
-        expires_at: expiresAt
-      }
-    ])
-    .select()
-    .single();
-
-  // If DB check constraint fails for 'both', fallback to 'file' or 'text' for backwards compatibility
-  if (dbError && dbError.message && dbError.message.includes('shares_type_check')) {
-    const fallbackType = file ? 'file' : 'text';
-    const { data: retryData, error: retryError } = await supabase
+    const passcode = generatePasscode();
+    const { data, error: dbError } = await supabase
       .from('shares')
       .insert([
         {
           code: passcode,
-          type: fallbackType,
-          content: finalContent,
-          storage_path: storagePath,
-          file_name: fileName,
-          file_size: fileSize,
+          type: 'text',
+          content: textContent,
+          storage_path: null,
+          file_name: null,
+          file_size: null,
           one_time_download: false,
           expires_at: expiresAt
         }
@@ -181,20 +139,130 @@ export async function createShareItem({ textContent, file, durationKey }) {
       .select()
       .single();
 
-    if (!retryError) {
-      data = retryData;
-      dbError = null;
+    if (dbError) {
+      throw new Error(`บันทึกข้อความไม่สำเร็จ: ${dbError.message}`);
+    }
+    return [data];
+  }
+
+  // Case 2: One or more files
+  for (const file of files) {
+    if (file.size > MAX_SIZE) {
+      throw new Error(`ไฟล์ "${file.name}" มีขนาดเกิน 50MB ไม่สามารถอัปโหลดได้น้า`);
     }
   }
 
-  if (dbError) {
-    if (storagePath) {
-      await supabase.storage.from('user-shares').remove([storagePath]);
+  const results = [];
+  const errors = [];
+  const totalCount = files.length;
+  let completedCount = 0;
+
+  // Process files with concurrency limit of 3 for fast & smooth uploading
+  const CONCURRENCY_LIMIT = 3;
+  let currentIndex = 0;
+
+  async function uploadWorker() {
+    while (currentIndex < files.length) {
+      const index = currentIndex++;
+      const file = files[index];
+      const timestamp = Date.now();
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `uploads/${timestamp}_${index}_${sanitizedFileName}`;
+      const passcode = generatePasscode();
+
+      try {
+        // 1. Upload to Supabase Storage
+        const { error: uploadError } = await supabase
+          .storage
+          .from('user-shares')
+          .upload(storagePath, file, { cacheControl: '3600', upsert: false });
+
+        if (uploadError) {
+          throw new Error(`อัปโหลด "${file.name}" ไม่สำเร็จ: ${uploadError.message}`);
+        }
+
+        const { data: publicUrlData } = supabase
+          .storage
+          .from('user-shares')
+          .getPublicUrl(storagePath);
+
+        const publicUrl = publicUrlData ? publicUrlData.publicUrl : '';
+        const fileType = textContent ? 'both' : 'file';
+        const finalContent = textContent ? textContent : (publicUrl || '');
+
+        // 2. Insert record into database
+        let { data, error: dbError } = await supabase
+          .from('shares')
+          .insert([
+            {
+              code: passcode,
+              type: fileType,
+              content: finalContent,
+              storage_path: storagePath,
+              file_name: file.name,
+              file_size: file.size,
+              one_time_download: false,
+              expires_at: expiresAt
+            }
+          ])
+          .select()
+          .single();
+
+        // Fallback for check constraint if type 'both' isn't supported in old schema
+        if (dbError && dbError.message && dbError.message.includes('shares_type_check')) {
+          const { data: retryData, error: retryError } = await supabase
+            .from('shares')
+            .insert([
+              {
+                code: passcode,
+                type: 'file',
+                content: finalContent,
+                storage_path: storagePath,
+                file_name: file.name,
+                file_size: file.size,
+                one_time_download: false,
+                expires_at: expiresAt
+              }
+            ])
+            .select()
+            .single();
+
+          if (!retryError) {
+            data = retryData;
+            dbError = null;
+          }
+        }
+
+        if (dbError) {
+          await supabase.storage.from('user-shares').remove([storagePath]);
+          throw new Error(`บันทึก "${file.name}" ไม่สำเร็จ: ${dbError.message}`);
+        }
+
+        results.push(data);
+      } catch (err) {
+        errors.push({ file: file.name, message: err.message });
+      } finally {
+        completedCount++;
+        if (onProgress) {
+          onProgress({
+            completed: completedCount,
+            total: totalCount,
+            currentFile: file.name,
+            percentage: Math.round((completedCount / totalCount) * 100)
+          });
+        }
+      }
     }
-    throw new Error(`บันทึกข้อมูลไม่สำเร็จ: ${dbError.message}`);
   }
 
-  return data;
+  const workers = Array.from({ length: Math.min(CONCURRENCY_LIMIT, files.length) }, () => uploadWorker());
+  await Promise.all(workers);
+
+  if (results.length === 0 && errors.length > 0) {
+    throw new Error(errors.map(e => e.message).join('\n'));
+  }
+
+  return results;
 }
 
 /**
@@ -281,6 +349,44 @@ export async function deleteShareRecordAndStorage(id, storagePath) {
     return { success: true };
   } catch (err) {
     console.error('Exception in deleteShareRecordAndStorage:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Batch delete multiple shares and their associated storage files
+ */
+export async function batchDeleteShares(items) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, error: 'Supabase client not configured' };
+  if (!items || items.length === 0) return { success: true };
+
+  try {
+    const ids = items.map(i => i.id).filter(Boolean);
+    const storagePaths = items.map(i => i.storage_path).filter(Boolean);
+
+    if (ids.length > 0) {
+      const { error: dbError } = await supabase
+        .from('shares')
+        .delete()
+        .in('id', ids);
+
+      if (dbError) {
+        console.error('Error batch deleting shares from DB:', dbError);
+        return { success: false, error: dbError.message };
+      }
+    }
+
+    if (storagePaths.length > 0) {
+      supabase.storage
+        .from('user-shares')
+        .remove(storagePaths)
+        .catch(stErr => console.warn('Storage batch cleanup warning:', stErr));
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('Exception in batchDeleteShares:', err);
     return { success: false, error: err.message };
   }
 }
