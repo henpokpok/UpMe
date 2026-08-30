@@ -17,9 +17,11 @@
 
 ## ✨ Key Features & Problem Solved
 
+- 🛡️ **Zero-Knowledge End-to-End Encryption (E2EE)**: Client-side AES-GCM 256-bit encryption for all text and binary files before cloud transmission. Zero plaintext leakage to Supabase.
+- ⚡ **Ultra-Low CPU & Memory Profile**: IntersectionObserver lazy-decryption, LRU memory-managed Blob URL cache, and GPU-accelerated rendering.
 - 📲 **Frictionless Cross-Device Transfers**: Solves the pain of sending files between different operating systems (Windows, Android, iPadOS, iOS) via a unified web interface.
 - ⏳ **Custom Expiration & Self-Destruct**: Set auto-deletion timers (1 Hour, 8 Hours, 24 Hours, or 7 Days) or enable **One-Time Download** to auto-destruct immediately after retrieval.
-- 🔢 **Passcode & QR Code Retrieval**: Access shared content instantly using a 6-digit numeric passcode or by scanning an auto-generated QR code.
+- 🔢 **Passcode, QR Code & Direct Feed Retrieval**: Access shared content instantly in real-time or by scanning an auto-generated QR code / pairing key.
 - 🧹 **Automated Database & Storage Cleanup**: Uses PostgreSQL `pg_cron` jobs and database triggers to purge expired records and storage buckets every 5 minutes.
 - 📱 **Native PWA Experience**: Installable on home screens as a standalone, distraction-free app across all desktop and mobile platforms.
 

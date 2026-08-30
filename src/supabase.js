@@ -1,4 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
+import {
+  getActiveCryptoKey,
+  encryptObject,
+  encryptBinary,
+  decryptObject,
+  decryptText,
+  decryptBinary,
+  isEncryptedPayload,
+  isEncryptedBinary
+} from './crypto.js';
 
 const STORAGE_URL_KEY = 'upme_supabase_url';
 const STORAGE_ANON_KEY = 'upme_supabase_anon_key';
@@ -7,22 +17,24 @@ const DEFAULT_SUPABASE_URL = 'https://sdsrxmetbtdzhooxqkkh.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_GYM_eBLwWpct8GT6pPuc-g_r_9zEr_1';
 
 export function getSupabaseConfig() {
-  let url = localStorage.getItem(STORAGE_URL_KEY);
-  let key = localStorage.getItem(STORAGE_ANON_KEY);
+  let url = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_URL_KEY) : null;
+  let key = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_ANON_KEY) : null;
 
   if (!url || !url.startsWith('http')) {
-    url = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+    url = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || DEFAULT_SUPABASE_URL;
   }
   if (!key || key.length < 10) {
-    key = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+    key = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || DEFAULT_SUPABASE_ANON_KEY;
   }
 
   return { url: url.trim(), key: key.trim() };
 }
 
 export function saveSupabaseConfig(url, key) {
-  localStorage.setItem(STORAGE_URL_KEY, url.trim());
-  localStorage.setItem(STORAGE_ANON_KEY, key.trim());
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(STORAGE_URL_KEY, url.trim());
+    localStorage.setItem(STORAGE_ANON_KEY, key.trim());
+  }
 }
 
 let supabaseClientInstance = null;
@@ -59,6 +71,9 @@ function calculateExpirationISO(durationKey) {
  */
 export function getFilePublicUrl(storagePath) {
   if (!storagePath) return null;
+  if (storagePath.startsWith('http://') || storagePath.startsWith('https://')) {
+    return storagePath;
+  }
   const supabase = getSupabaseClient();
   if (!supabase) return null;
   const { data } = supabase.storage.from('user-shares').getPublicUrl(storagePath);
@@ -76,7 +91,7 @@ export async function savePushSubscription(subscription) {
     const { error } = await supabase.from('push_subscriptions').insert([
       {
         subscription: subscription,
-        user_agent: navigator.userAgent
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Node.js'
       }
     ]);
 
@@ -93,26 +108,161 @@ export async function savePushSubscription(subscription) {
 }
 
 /**
- * Create a new share item (single file or text)
+ * Infer MIME type from filename or path extension
  */
-export async function createShareItem({ textContent, file, durationKey }) {
+export function inferMimeType(fileNameOrPath, fallback = 'application/octet-stream') {
+  if (!fileNameOrPath || typeof fileNameOrPath !== 'string') return fallback;
+  const clean = fileNameOrPath.toLowerCase().split('?')[0].split('#')[0];
+  if (clean.endsWith('.png')) return 'image/png';
+  if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'image/jpeg';
+  if (clean.endsWith('.gif')) return 'image/gif';
+  if (clean.endsWith('.webp')) return 'image/webp';
+  if (clean.endsWith('.svg')) return 'image/svg+xml';
+  if (clean.endsWith('.heic')) return 'image/heic';
+  if (clean.endsWith('.heif')) return 'image/heif';
+  if (clean.endsWith('.pdf')) return 'application/pdf';
+  if (clean.endsWith('.txt')) return 'text/plain';
+  if (clean.endsWith('.json')) return 'application/json';
+  if (clean.endsWith('.csv')) return 'text/csv';
+  if (clean.endsWith('.mp4')) return 'video/mp4';
+  if (clean.endsWith('.mov')) return 'video/quicktime';
+  if (clean.endsWith('.webm')) return 'video/webm';
+  if (clean.endsWith('.mp3')) return 'audio/mpeg';
+  if (clean.endsWith('.wav')) return 'audio/wav';
+  if (clean.endsWith('.zip')) return 'application/zip';
+  if (clean.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (clean.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (clean.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  return fallback;
+}
+
+/**
+ * Decrypt a single raw share record from the database
+ */
+export async function decryptShareRecord(rawItem, cryptoKey = null) {
+  if (!rawItem) return null;
+  const key = cryptoKey || getActiveCryptoKey();
+  const item = { ...rawItem };
+
+  if (isEncryptedPayload(item.content)) {
+    if (!key) {
+      item._decrypted = false;
+      item._isLocked = true;
+      item.decryptedContent = '🔒 Encrypted payload — Key required';
+      item.decryptedFileName = item.storage_path ? '🔒 Encrypted File' : null;
+      item.decryptedMimeType = null;
+      item.decryptedFileSize = item.file_size;
+      return item;
+    }
+
+    try {
+      const decryptedText = await decryptText(item.content, key);
+      let decryptedMeta = null;
+      try {
+        decryptedMeta = JSON.parse(decryptedText);
+      } catch {
+        // Plain string payload (not a JSON object)
+        decryptedMeta = { text: decryptedText };
+      }
+
+      const isMetaObj = decryptedMeta && typeof decryptedMeta === 'object' && !Array.isArray(decryptedMeta);
+      const textVal = isMetaObj && typeof decryptedMeta.text === 'string' 
+        ? decryptedMeta.text 
+        : (typeof decryptedMeta === 'string' ? decryptedMeta : decryptedText);
+
+      const resolvedFileName = (isMetaObj && decryptedMeta.fileName) 
+        ? decryptedMeta.fileName 
+        : (item.file_name && !item.file_name.includes('[E2EE Encrypted File]') 
+            ? item.file_name 
+            : (item.storage_path ? 'File' : null));
+
+      const resolvedMime = (isMetaObj && decryptedMeta.mimeType) 
+        ? decryptedMeta.mimeType 
+        : inferMimeType(resolvedFileName || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
+
+      item._decrypted = true;
+      item._isLocked = false;
+      item.decryptedContent = textVal || '';
+      item.decryptedFileName = resolvedFileName;
+      item.decryptedMimeType = resolvedMime;
+      item.decryptedFileSize = (isMetaObj && typeof decryptedMeta.fileSize === 'number') 
+        ? decryptedMeta.fileSize 
+        : item.file_size;
+      return item;
+    } catch (err) {
+      // Key is incorrect or payload corrupted
+      item._decrypted = false;
+      item._isLocked = true;
+      item.decryptedContent = '🔒 Encrypted payload — Key required';
+      item.decryptedFileName = item.storage_path ? '🔒 Encrypted File' : null;
+      item.decryptedMimeType = null;
+      item.decryptedFileSize = item.file_size;
+      return item;
+    }
+  } else {
+    // Legacy unencrypted record
+    item._decrypted = true;
+    item._isLocked = false;
+    item.decryptedContent = item.content || '';
+    item.decryptedFileName = item.file_name;
+    item.decryptedMimeType = inferMimeType(item.file_name || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
+    item.decryptedFileSize = item.file_size;
+    return item;
+  }
+}
+
+/**
+ * Fetch and decrypt binary file data from Supabase Storage
+ */
+export async function fetchAndDecryptFile(storagePath, cryptoKey = null, mimeType = null) {
+  if (!storagePath) throw new Error('Storage path is required');
+  const fileUrl = getFilePublicUrl(storagePath);
+  if (!fileUrl) throw new Error(`Could not get public URL for ${storagePath}`);
+
+  const key = cryptoKey || getActiveCryptoKey();
+  const res = await fetch(fileUrl);
+  if (!res.ok) throw new Error(`Failed to fetch file from storage: HTTP ${res.status}`);
+
+  const rawBuffer = await res.arrayBuffer();
+  const effectiveMime = (mimeType && mimeType !== 'application/octet-stream')
+    ? mimeType
+    : inferMimeType(storagePath, 'application/octet-stream');
+
+  if (isEncryptedBinary(rawBuffer)) {
+    if (!key) {
+      throw new Error('Encryption key required to decrypt file');
+    }
+    const decryptedBuffer = await decryptBinary(rawBuffer, key);
+    return new Blob([decryptedBuffer], { type: effectiveMime });
+  } else {
+    // Legacy unencrypted file
+    return new Blob([rawBuffer], { type: effectiveMime });
+  }
+}
+
+/**
+ * Create a new share item (single file or text) with E2EE
+ */
+export async function createShareItem({ textContent, file, durationKey, cryptoKey = null }) {
   const items = await createMultipleShareItems({
     textContent,
     files: file ? [file] : [],
-    durationKey
+    durationKey,
+    cryptoKey
   });
   return items[0];
 }
 
 /**
- * Upload multiple files (and optional text) with concurrency and progress reporting
+ * Upload multiple files (and optional text) with E2EE client-side encryption
  */
-export async function createMultipleShareItems({ textContent, files = [], durationKey, onProgress }) {
+export async function createMultipleShareItems({ textContent, files = [], durationKey, onProgress, cryptoKey = null }) {
   const supabase = getSupabaseClient();
   if (!supabase) {
     throw new Error('กรุณาตั้งค่า Supabase URL และ Anon Key ในเมนูตั้งค่าก่อนใช้งานนะจ๊ะ');
   }
 
+  const key = cryptoKey || getActiveCryptoKey();
   const expiresAt = calculateExpirationISO(durationKey);
   const MAX_SIZE = 50 * 1024 * 1024; // 50MB per file
 
@@ -122,13 +272,25 @@ export async function createMultipleShareItems({ textContent, files = [], durati
       throw new Error('กรุณาระบุข้อความหรือเลือกไฟล์อย่างน้อย 1 อย่าง');
     }
     const passcode = generatePasscode();
+
+    // Client-Side E2EE: Encrypt text & metadata object
+    let finalContent = textContent;
+    if (key) {
+      finalContent = await encryptObject({
+        text: textContent,
+        fileName: null,
+        mimeType: null,
+        fileSize: null
+      }, key);
+    }
+
     const { data, error: dbError } = await supabase
       .from('shares')
       .insert([
         {
           code: passcode,
           type: 'text',
-          content: textContent,
+          content: finalContent,
           storage_path: null,
           file_name: null,
           file_size: null,
@@ -142,7 +304,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
     if (dbError) {
       throw new Error(`บันทึกข้อความไม่สำเร็จ: ${dbError.message}`);
     }
-    return [data];
+    return [await decryptShareRecord(data, key)];
   }
 
   // Case 2: One or more files
@@ -157,7 +319,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
   const totalCount = files.length;
   let completedCount = 0;
 
-  // Process files with concurrency limit of 3 for fast & smooth uploading
+  // Process files with concurrency limit of 3
   const CONCURRENCY_LIMIT = 3;
   let currentIndex = 0;
 
@@ -166,31 +328,52 @@ export async function createMultipleShareItems({ textContent, files = [], durati
       const index = currentIndex++;
       const file = files[index];
       const timestamp = Date.now();
-      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `uploads/${timestamp}_${index}_${sanitizedFileName}`;
+      
+      // Zero-Knowledge storage path (anonymized UUID, no filename leak)
+      const randomSuffix = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+        ? crypto.randomUUID().replace(/-/g, '') 
+        : Math.random().toString(36).substring(2) + timestamp.toString(36);
+      const storagePath = `uploads/${timestamp}_${index}_${randomSuffix}.bin`;
       const passcode = generatePasscode();
 
       try {
-        // 1. Upload to Supabase Storage
+        let uploadBlob = file;
+        let encryptedFileSize = file.size;
+
+        // 1. Client-Side E2EE Binary Encryption
+        if (key) {
+          const fileBuffer = await file.arrayBuffer();
+          const encryptedBytes = await encryptBinary(fileBuffer, key);
+          uploadBlob = new Blob([encryptedBytes], { type: 'application/octet-stream' });
+          encryptedFileSize = encryptedBytes.byteLength;
+        }
+
+        // 2. Upload Encrypted Binary to Supabase Storage
         const { error: uploadError } = await supabase
           .storage
           .from('user-shares')
-          .upload(storagePath, file, { cacheControl: '3600', upsert: false });
+          .upload(storagePath, uploadBlob, { cacheControl: '3600', upsert: false });
 
         if (uploadError) {
           throw new Error(`อัปโหลด "${file.name}" ไม่สำเร็จ: ${uploadError.message}`);
         }
 
-        const { data: publicUrlData } = supabase
-          .storage
-          .from('user-shares')
-          .getPublicUrl(storagePath);
+        // 3. Encrypt sensitive metadata (real filename, mime type, note)
+        let finalContent = textContent || '';
+        const maskedFileName = key ? '[E2EE Encrypted File]' : file.name;
 
-        const publicUrl = publicUrlData ? publicUrlData.publicUrl : '';
+        if (key) {
+          finalContent = await encryptObject({
+            text: textContent || '',
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            fileSize: file.size
+          }, key);
+        }
+
         const fileType = textContent ? 'both' : 'file';
-        const finalContent = textContent ? textContent : (publicUrl || '');
 
-        // 2. Insert record into database
+        // 4. Insert record into database
         let { data, error: dbError } = await supabase
           .from('shares')
           .insert([
@@ -199,8 +382,8 @@ export async function createMultipleShareItems({ textContent, files = [], durati
               type: fileType,
               content: finalContent,
               storage_path: storagePath,
-              file_name: file.name,
-              file_size: file.size,
+              file_name: maskedFileName,
+              file_size: encryptedFileSize,
               one_time_download: false,
               expires_at: expiresAt
             }
@@ -218,8 +401,8 @@ export async function createMultipleShareItems({ textContent, files = [], durati
                 type: 'file',
                 content: finalContent,
                 storage_path: storagePath,
-                file_name: file.name,
-                file_size: file.size,
+                file_name: maskedFileName,
+                file_size: encryptedFileSize,
                 one_time_download: false,
                 expires_at: expiresAt
               }
@@ -238,7 +421,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
           throw new Error(`บันทึก "${file.name}" ไม่สำเร็จ: ${dbError.message}`);
         }
 
-        results.push(data);
+        results.push(await decryptShareRecord(data, key));
       } catch (err) {
         errors.push({ file: file.name, message: err.message });
       } finally {
@@ -266,9 +449,9 @@ export async function createMultipleShareItems({ textContent, files = [], durati
 }
 
 /**
- * Fetch all active non-expired shares for single-user live feed
+ * Fetch all active non-expired shares and decrypt them on the fly
  */
-export async function getActiveSharesList() {
+export async function getActiveSharesList(cryptoKey = null) {
   try {
     const supabase = getSupabaseClient();
     if (!supabase) return [];
@@ -284,37 +467,56 @@ export async function getActiveSharesList() {
       return [];
     }
 
-    return data || [];
+    if (!data || data.length === 0) return [];
+
+    const key = cryptoKey || getActiveCryptoKey();
+    const decryptedItems = await Promise.all(data.map(item => decryptShareRecord(item, key)));
+    return decryptedItems;
   } catch (err) {
     console.error('Exception in getActiveSharesList:', err);
     return [];
   }
 }
 
+let activeRealtimeChannel = null;
+
 /**
  * Subscribe safely to Realtime WebSocket INSERT broadcasts on 'shares' table
  */
-export function subscribeToRealtimeUploads(onNewUpload) {
+export function subscribeToRealtimeUploads(onNewUpload, cryptoKey = null) {
   try {
     const supabase = getSupabaseClient();
     if (!supabase) return null;
 
-    const channel = supabase
+    if (activeRealtimeChannel) {
+      try {
+        supabase.removeChannel(activeRealtimeChannel);
+      } catch (unsubErr) {
+        console.warn('Channel removal note:', unsubErr);
+      }
+      activeRealtimeChannel = null;
+    }
+
+    activeRealtimeChannel = supabase
       .channel('upme-realtime-channel')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'shares' },
-        (payload) => {
+        async (payload) => {
           if (payload && payload.new) {
-            onNewUpload(payload.new);
+            const key = cryptoKey || getActiveCryptoKey();
+            const decryptedRecord = await decryptShareRecord(payload.new, key);
+            onNewUpload(decryptedRecord);
           }
         }
       )
       .subscribe((status) => {
-        console.log('Realtime status:', status);
+        if (status === 'SUBSCRIBED') {
+          // Connected safely
+        }
       });
 
-    return channel;
+    return activeRealtimeChannel;
   } catch (err) {
     console.warn('Realtime subscription warning:', err);
     return null;
@@ -393,13 +595,28 @@ export async function batchDeleteShares(items) {
 
 /**
  * Calculate total active storage bytes used out of 1GB free tier limit
+ * Supports passing pre-fetched shares to avoid duplicate network queries and decryptions
  */
-export async function getStorageUsageInfo() {
+export async function getStorageUsageInfo(providedShares = null) {
   try {
-    const shares = await getActiveSharesList();
-    const totalBytes = shares.reduce((acc, curr) => acc + (curr.file_size || 0), 0);
-    const activeCount = shares.length;
-    return { totalBytes, activeCount };
+    if (Array.isArray(providedShares)) {
+      const totalBytes = providedShares.reduce((acc, curr) => acc + (curr.file_size || curr.decryptedFileSize || 0), 0);
+      const activeCount = providedShares.length;
+      return { totalBytes, activeCount };
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return { totalBytes: 0, activeCount: 0 };
+
+    const { data, error } = await supabase
+      .from('shares')
+      .select('file_size')
+      .gt('expires_at', new Date().toISOString());
+
+    if (error || !data) return { totalBytes: 0, activeCount: 0 };
+
+    const totalBytes = data.reduce((acc, curr) => acc + (curr.file_size || 0), 0);
+    return { totalBytes, activeCount: data.length };
   } catch (err) {
     return { totalBytes: 0, activeCount: 0 };
   }

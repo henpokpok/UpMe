@@ -10,8 +10,26 @@ import {
   getStorageUsageInfo,
   subscribeToRealtimeUploads,
   savePushSubscription,
-  getFilePublicUrl
+  getFilePublicUrl,
+  fetchAndDecryptFile,
+  decryptShareRecord
 } from './supabase.js';
+import {
+  initializeEncryptionKey,
+  getActiveCryptoKey,
+  setActiveCryptoKey,
+  saveEncryptionKey,
+  setMasterPassphrase,
+  setRawKeyBase64,
+  generateRandomKey,
+  exportKeyToBase64,
+  importKeyFromBase64,
+  deriveKeyFromPassphrase,
+  getKeyFingerprint,
+  getPairingUrl,
+  applyKeyOrPassphrase,
+  STORAGE_E2EE_PASSPHRASE
+} from './crypto.js';
 
 // Local Storage Key for Accessed Items
 const ACCESSED_ITEMS_KEY = 'upme_accessed_ids';
@@ -32,6 +50,88 @@ function markItemAsAccessed(id) {
   }
 }
 
+// In-Memory Decrypted Object URLs LRU Cache (storagePath -> blobUrl)
+const MAX_BLOB_CACHE_ITEMS = 20;
+const decryptedBlobUrlCache = new Map();
+
+function cacheDecryptedBlobUrl(storagePath, url) {
+  if (!storagePath || !url) return;
+  if (decryptedBlobUrlCache.has(storagePath)) {
+    const oldUrl = decryptedBlobUrlCache.get(storagePath);
+    if (oldUrl !== url) {
+      try { URL.revokeObjectURL(oldUrl); } catch {}
+    }
+    decryptedBlobUrlCache.delete(storagePath);
+  } else if (decryptedBlobUrlCache.size >= MAX_BLOB_CACHE_ITEMS) {
+    const oldestKey = decryptedBlobUrlCache.keys().next().value;
+    if (oldestKey) {
+      const oldestUrl = decryptedBlobUrlCache.get(oldestKey);
+      try { URL.revokeObjectURL(oldestUrl); } catch {}
+      decryptedBlobUrlCache.delete(oldestKey);
+    }
+  }
+  decryptedBlobUrlCache.set(storagePath, url);
+}
+
+function clearDecryptedBlobCache() {
+  decryptedBlobUrlCache.forEach((url) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {}
+  });
+  decryptedBlobUrlCache.clear();
+}
+
+function revokeBlobUrlForPath(storagePath) {
+  if (storagePath && decryptedBlobUrlCache.has(storagePath)) {
+    try {
+      URL.revokeObjectURL(decryptedBlobUrlCache.get(storagePath));
+    } catch {}
+    decryptedBlobUrlCache.delete(storagePath);
+  }
+}
+
+// Robust Clipboard Copy Helper with ExecCommand Fallback
+async function copyToClipboard(text, successToastMsg = '📋 Copied!') {
+  if (!text) return false;
+  let copied = false;
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+    } catch (err) {
+      console.warn('navigator.clipboard.writeText rejected:', err);
+    }
+  }
+
+  if (!copied && typeof document !== 'undefined') {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      copied = document.execCommand('copy');
+      document.body.removeChild(textarea);
+    } catch (fallbackErr) {
+      console.warn('execCommand fallback failed:', fallbackErr);
+    }
+  }
+
+  if (copied) {
+    if (successToastMsg) showToast(successToastMsg);
+    return true;
+  } else {
+    showToast('⚠️ Could not copy to clipboard automatically.');
+    return false;
+  }
+}
+
 // Application State
 let selectedFiles = []; // Array of File objects
 let selectedDurationKey = '24h'; // Default '24h'
@@ -42,6 +142,7 @@ let selectedShareIds = new Set();
 let currentSharesList = [];
 
 // DOM Elements
+const headerE2eeBadge = document.getElementById('header-e2ee-badge');
 const historyBtn = document.getElementById('history-btn');
 const historyPopover = document.getElementById('history-popover');
 const popoverNotifyToggle = document.getElementById('popover-notify-toggle');
@@ -86,6 +187,21 @@ const saveConfigBtn = document.getElementById('save-config-btn');
 const cfgUrl = document.getElementById('cfg-url');
 const cfgKey = document.getElementById('cfg-key');
 
+const settingsE2eeBadge = document.getElementById('settings-e2ee-badge');
+const settingsKeyFingerprint = document.getElementById('settings-key-fingerprint');
+const cfgPassphrase = document.getElementById('cfg-passphrase');
+const setPassphraseBtn = document.getElementById('set-passphrase-btn');
+const copyPairingLinkBtn = document.getElementById('copy-pairing-link-btn');
+const showPairingQrBtn = document.getElementById('show-pairing-qr-btn');
+const copyRawKeyBtn = document.getElementById('copy-raw-key-btn');
+const generateNewKeyBtn = document.getElementById('generate-new-key-btn');
+
+const unlockModal = document.getElementById('unlock-modal');
+const closeUnlockModalBtn = document.getElementById('close-unlock-modal-btn');
+const unlockPassphraseInput = document.getElementById('unlock-passphrase-input');
+const unlockSubmitBtn = document.getElementById('unlock-submit-btn');
+const unlockOpenSettingsBtn = document.getElementById('unlock-open-settings-btn');
+
 const itemModal = document.getElementById('item-modal');
 const closeItemModalBtn = document.getElementById('close-item-modal-btn');
 const modalItemBadge = document.getElementById('modal-item-badge');
@@ -107,28 +223,96 @@ const pwaInstallBtn = document.getElementById('pwa-install-btn');
 const toast = document.getElementById('toast');
 
 // --- Initialization ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initHistoryPopover();
   initPills();
   initDropzone();
   initForms();
   initBatchActions();
   initSettingsModal();
+  initUnlockModal();
   initItemModal();
   initQrModal();
   initPWA();
+
+  // Initialize E2EE Key (from URL hash pairing, localStorage, or auto-generate)
+  try {
+    const initResult = await initializeEncryptionKey();
+    await updateE2EEUI();
+    if (initResult && initResult.paired) {
+      showToast('🔑 Encryption key paired & synced successfully!');
+    }
+  } catch (err) {
+    console.warn('E2EE initialization note:', err);
+    await updateE2EEUI();
+  }
   
   refreshAppFeed();
   initRealtimeSubscription();
   checkSharedDataFromGallery();
 
-  // Auto-refresh feed whenever tab becomes active/visible
+  // Auto-refresh feed when tab becomes active & pause CSS animations when hidden
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      refreshAppFeed();
+    if (document.hidden) {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.classList.add('tab-hidden');
+      }
+    } else {
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.classList.remove('tab-hidden');
+      }
+      debouncedRefreshAppFeed(200);
     }
   });
 });
+
+let feedDebounceTimer = null;
+function debouncedRefreshAppFeed(delay = 300) {
+  if (feedDebounceTimer) clearTimeout(feedDebounceTimer);
+  feedDebounceTimer = setTimeout(() => {
+    refreshAppFeed();
+  }, delay);
+}
+
+// Update E2EE Status Badges and Key Fingerprints in UI
+async function updateE2EEUI() {
+  const key = getActiveCryptoKey();
+
+  if (key) {
+    const fingerprint = await getKeyFingerprint(key);
+    if (headerE2eeBadge) {
+      headerE2eeBadge.className = 'e2ee-header-badge protected';
+      headerE2eeBadge.innerHTML = `<span class="e2ee-icon">🛡️</span><span class="e2ee-text">E2EE Protected</span>`;
+      headerE2eeBadge.title = `AES-GCM 256-bit E2EE Active (Key ID: #${fingerprint})`;
+    }
+    if (settingsE2eeBadge) {
+      settingsE2eeBadge.className = 'e2ee-status-pill protected';
+      settingsE2eeBadge.textContent = '🛡️ AES-GCM 256-bit Active';
+    }
+    if (settingsKeyFingerprint) {
+      settingsKeyFingerprint.textContent = `Key: #${fingerprint}`;
+      settingsKeyFingerprint.classList.remove('hidden');
+    }
+  } else {
+    if (headerE2eeBadge) {
+      headerE2eeBadge.className = 'e2ee-header-badge locked';
+      headerE2eeBadge.innerHTML = `<span class="e2ee-icon">⚠️</span><span class="e2ee-text">Key Required</span>`;
+      headerE2eeBadge.title = 'Encryption key required to decrypt data';
+    }
+    if (settingsE2eeBadge) {
+      settingsE2eeBadge.className = 'e2ee-status-pill locked';
+      settingsE2eeBadge.textContent = '🔒 Key Required';
+    }
+    if (settingsKeyFingerprint) {
+      settingsKeyFingerprint.textContent = 'Key: None';
+    }
+  }
+
+  // Populate stored passphrase if available
+  if (cfgPassphrase && typeof localStorage !== 'undefined') {
+    cfgPassphrase.value = localStorage.getItem(STORAGE_E2EE_PASSPHRASE) || '';
+  }
+}
 
 // Helper to load shared images/files sent directly from phone's Gallery Share Menu
 async function checkSharedDataFromGallery() {
@@ -209,7 +393,6 @@ function formatBytes(bytes, decimals = 1) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-// Clean concise remaining time format
 function formatRemainingTimeClean(expiresAtISO) {
   const diffMs = new Date(expiresAtISO) - new Date();
   if (diffMs <= 0) return 'Expired';
@@ -226,7 +409,6 @@ function formatRemainingTimeClean(expiresAtISO) {
   return `${mins} นาที`;
 }
 
-// Short time format e.g. "07:31 PM"
 function formatShortTime(createdAtISO) {
   return new Date(createdAtISO).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 }
@@ -237,7 +419,6 @@ function calculateConfiguredHoursText(createdAtISO, expiresAtISO) {
   return `${diffHours}h`;
 }
 
-// Helper to convert Base64 URL Key to Uint8Array for VAPID Web Push
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -249,8 +430,6 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
-// Register background Web Push PushManager subscription
-// silent = true on auto-load to avoid toast notifications every time the user enters the app
 async function registerWebPushSubscription(silent = false) {
   if (!('serviceWorker' in navigator)) {
     if (!silent) showToast('⚠️ เบราว์เซอร์นี้ยังไม่รองรับ ServiceWorker');
@@ -300,13 +479,13 @@ async function registerWebPushSubscription(silent = false) {
 function initHistoryPopover() {
   if ('Notification' in window && Notification.permission === 'granted') {
     if (popoverNotifyToggle) popoverNotifyToggle.checked = true;
-    registerWebPushSubscription(true); // Silent sync on page load
+    registerWebPushSubscription(true);
   }
 
   if (forceRegisterPushBtn) {
     forceRegisterPushBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      registerWebPushSubscription(false); // Explicit click -> Shows toast
+      registerWebPushSubscription(false);
     });
   }
 
@@ -377,7 +556,7 @@ async function openHistoryPopover() {
 
     const uploadTimeStr = formatShortTime(item.created_at);
     const isAccessed = accessedList.includes(item.id);
-    const titleStr = item.file_name || item.content || 'Item';
+    const titleStr = item._isLocked ? '🔒 Encrypted item' : (item.decryptedFileName || item.decryptedContent || 'Item');
 
     rowEl.innerHTML = `
       <div class="history-item-info">
@@ -400,6 +579,7 @@ async function openHistoryPopover() {
       e.stopPropagation();
 
       if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+        revokeBlobUrlForPath(item.storage_path);
         const res = await deleteShareRecordAndStorage(item.id, item.storage_path);
         if (res.success) {
           showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
@@ -426,39 +606,29 @@ function triggerSystemNotification(newRecord) {
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
 
-  const isFile = newRecord.type === 'file' || newRecord.type === 'both' || Boolean(newRecord.file_name);
-  const isImage = isFile && newRecord.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(newRecord.file_name);
-
+  const isFile = newRecord.type === 'file' || newRecord.type === 'both' || Boolean(newRecord.storage_path);
   const title = 'UpMee 🐰';
   let bodyText = '';
-  let iconUrl = '/bunny_mascot.png';
-  let imageUrl = undefined;
 
-  if (isFile) {
-    bodyText = `ไฟล์ใหม่: ${newRecord.file_name || 'ไฟล์แนบ'}`;
-    if (isImage && newRecord.content) {
-      iconUrl = newRecord.content;
-      imageUrl = newRecord.content;
-    }
+  if (newRecord._isLocked) {
+    bodyText = '🔒 ได้รับรายการใหม่ (เข้ารหัส E2EE)';
+  } else if (isFile) {
+    bodyText = `ไฟล์ใหม่: ${newRecord.decryptedFileName || 'ไฟล์แนบ'}`;
   } else {
-    bodyText = newRecord.content ? newRecord.content.substring(0, 40) : '';
+    bodyText = newRecord.decryptedContent ? newRecord.decryptedContent.substring(0, 40) : 'ข้อความใหม่';
   }
 
   const itemTag = 'upmee-share-' + (newRecord.id || newRecord.created_at || 'item');
 
   const options = {
     body: bodyText,
-    icon: iconUrl,
+    icon: '/bunny_mascot.png',
     badge: '/icon-192.png',
     vibrate: [200, 100, 200],
     tag: itemTag,
     renotify: false,
     data: newRecord
   };
-
-  if (imageUrl) {
-    options.image = imageUrl;
-  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.ready.then(reg => {
@@ -474,7 +644,7 @@ function triggerSystemNotification(newRecord) {
 // --- Realtime WebSocket Listener ---
 function initRealtimeSubscription() {
   subscribeToRealtimeUploads((newRecord) => {
-    refreshAppFeed();
+    debouncedRefreshAppFeed(250);
     triggerSystemNotification(newRecord);
   });
 }
@@ -495,7 +665,6 @@ function initDropzone() {
   if (!dropzone) return;
 
   dropzone.addEventListener('click', (e) => {
-    // Prevent triggering file input when clicking queue buttons
     if (
       e.target.closest('#add-more-files-btn') ||
       e.target.closest('#clear-all-files-btn') ||
@@ -509,7 +678,7 @@ function initDropzone() {
   fileInput.addEventListener('change', (e) => {
     if (e.target.files && e.target.files.length > 0) {
       handleFilesSelection(Array.from(e.target.files));
-      fileInput.value = ''; // Reset input to allow re-selection of the same files if needed
+      fileInput.value = '';
     }
   });
 
@@ -555,7 +724,6 @@ function initDropzone() {
 function handleFilesSelection(newFiles) {
   const MAX_SIZE = 50 * 1024 * 1024; // 50MB
   let oversizedCount = 0;
-  let addedCount = 0;
 
   newFiles.forEach(file => {
     if (file.size > MAX_SIZE) {
@@ -563,14 +731,12 @@ function handleFilesSelection(newFiles) {
       return;
     }
 
-    // Deduplicate against existing queued files (by name, size, and lastModified)
     const isDuplicate = selectedFiles.some(
       existing => existing.name === file.name && existing.size === file.size && existing.lastModified === file.lastModified
     );
 
     if (!isDuplicate) {
       selectedFiles.push(file);
-      addedCount++;
     }
   });
 
@@ -683,7 +849,7 @@ function initForms() {
 
     try {
       submitShareBtn.disabled = true;
-      submitShareBtn.innerHTML = `<span>⏳ Uploading...</span>`;
+      submitShareBtn.innerHTML = `<span>⏳ Encrypting & Uploading...</span>`;
 
       await createMultipleShareItems({
         textContent: textVal,
@@ -697,9 +863,9 @@ function initForms() {
       });
 
       if (totalToUpload > 1) {
-        showToast(`🎉 Uploaded ${totalToUpload} files successfully!`);
+        showToast(`🎉 Encrypted & uploaded ${totalToUpload} files successfully! 🛡️`);
       } else {
-        showToast('🎉 Upload Complete!');
+        showToast('🎉 Upload Complete (E2EE Protected 🛡️)!');
       }
 
       // Clear form & queue
@@ -801,7 +967,6 @@ function updateBatchUI() {
     batchSelectAllCb.indeterminate = selectedCount > 0 && selectedCount < currentSharesList.length;
   }
 
-  // Update card selected highlights & checkboxes in DOM
   const cards = document.querySelectorAll('.cloud-item-row-card');
   cards.forEach(card => {
     const id = card.getAttribute('data-id');
@@ -812,9 +977,9 @@ function updateBatchUI() {
   });
 }
 
-// Download All active files as single ZIP
+// Download All active files as single ZIP (with transparent client-side decryption)
 async function downloadAllAsZip() {
-  const fileItems = currentSharesList.filter(item => item.storage_path || item.content);
+  const fileItems = currentSharesList.filter(item => item.storage_path || item.decryptedContent);
   if (!fileItems || fileItems.length === 0) {
     showToast('⚠️ ไม่มีไฟล์สำหรับดาวน์โหลด');
     return;
@@ -834,7 +999,7 @@ async function downloadSelectedAsZip() {
   await downloadFilesAsZip(selectedItems, `UpMee_Selected_${dateStr}.zip`);
 }
 
-// Download Selected items as concurrent individual files
+// Download Selected items concurrently
 async function downloadSelectedConcurrently() {
   const selectedItems = currentSharesList.filter(item => selectedShareIds.has(item.id));
   if (selectedItems.length === 0) {
@@ -854,6 +1019,7 @@ async function batchDeleteSelected() {
 
   if (confirm(`คุณต้องการลบ ${selectedItems.length} รายการที่เลือกใช่หรือไม่?`)) {
     showToast('⏳ กำลังลบรายการ...');
+    selectedItems.forEach(i => revokeBlobUrlForPath(i.storage_path));
     const res = await batchDeleteShares(selectedItems);
     if (res.success) {
       showToast(`🗑️ ลบ ${selectedItems.length} รายการเรียบร้อยแล้ว!`);
@@ -866,52 +1032,55 @@ async function batchDeleteSelected() {
   }
 }
 
-// Robust JSZip file archiver with concurrency and progress
+// Robust JSZip file archiver with on-the-fly decryption and duplicate name handling
 async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.zip') {
   try {
-    showToast(`⏳ กำลังเตรียมและบีบอัด ${itemsToDownload.length} รายการ...`);
+    showToast(`⏳ กำลังถอดรหัสและบีบอัด ${itemsToDownload.length} รายการ...`);
     const zip = new JSZip();
     const usedNames = new Map();
 
-    const fetchPromises = itemsToDownload.map(async (item, index) => {
-      const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
-      const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
-
-      if (isFile && fileUrl) {
-        try {
-          const res = await fetch(fileUrl);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const blob = await res.blob();
-
-          let fileNameStr = item.file_name || `file_${index + 1}`;
-          // Handle duplicate file names in ZIP
-          if (usedNames.has(fileNameStr)) {
-            const count = usedNames.get(fileNameStr) + 1;
-            usedNames.set(fileNameStr, count);
-            const extDot = fileNameStr.lastIndexOf('.');
-            if (extDot > 0) {
-              fileNameStr = `${fileNameStr.slice(0, extDot)}_${count}${fileNameStr.slice(extDot)}`;
-            } else {
-              fileNameStr = `${fileNameStr}_${count}`;
-            }
-          } else {
-            usedNames.set(fileNameStr, 1);
-          }
-
-          zip.file(fileNameStr, blob);
-          markItemAsAccessed(item.id);
-        } catch (fetchErr) {
-          console.warn(`Failed to fetch file for ZIP (${item.file_name}):`, fetchErr);
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < itemsToDownload.length; i += BATCH_SIZE) {
+      const chunk = itemsToDownload.slice(i, i + BATCH_SIZE);
+      await Promise.all(chunk.map(async (item, chunkIdx) => {
+        const index = i + chunkIdx;
+        if (item._isLocked) {
+          console.warn(`Item ${item.id} is locked, skipping from ZIP`);
+          return;
         }
-      } else if (item.content) {
-        // For text-only items, bundle as .txt notes inside the zip
-        let textName = `note_${index + 1}.txt`;
-        zip.file(textName, item.content);
-        markItemAsAccessed(item.id);
-      }
-    });
 
-    await Promise.all(fetchPromises);
+        const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
+
+        if (isFile && item.storage_path) {
+          try {
+            const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
+            let fileNameStr = item.decryptedFileName || `file_${index + 1}`;
+
+            if (usedNames.has(fileNameStr)) {
+              const count = usedNames.get(fileNameStr) + 1;
+              usedNames.set(fileNameStr, count);
+              const extDot = fileNameStr.lastIndexOf('.');
+              if (extDot > 0) {
+                fileNameStr = `${fileNameStr.slice(0, extDot)}_${count}${fileNameStr.slice(extDot)}`;
+              } else {
+                fileNameStr = `${fileNameStr}_${count}`;
+              }
+            } else {
+              usedNames.set(fileNameStr, 1);
+            }
+
+            zip.file(fileNameStr, blob);
+            markItemAsAccessed(item.id);
+          } catch (fetchErr) {
+            console.warn(`Failed to fetch/decrypt file for ZIP (${item.decryptedFileName}):`, fetchErr);
+          }
+        } else if (item.decryptedContent) {
+          let textName = `note_${index + 1}.txt`;
+          zip.file(textName, item.decryptedContent);
+          markItemAsAccessed(item.id);
+        }
+      }));
+    }
 
     showToast('📦 กำลังสร้างไฟล์ ZIP...');
     const zipBlob = await zip.generateAsync({
@@ -937,19 +1106,20 @@ async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.
   }
 }
 
-// Download multiple files concurrently via staggered blob triggers
+// Download multiple files concurrently via client-side decrypted blob triggers
 async function downloadFilesConcurrently(itemsToDownload) {
-  showToast(`⚡ กำลังดาวน์โหลด ${itemsToDownload.length} ไฟล์พร้อมกัน...`);
+  showToast(`⚡ กำลังถอดรหัสและดาวน์โหลด ${itemsToDownload.length} ไฟล์พร้อมกัน...`);
 
   for (let i = 0; i < itemsToDownload.length; i++) {
     const item = itemsToDownload[i];
-    const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
-    const fileNameStr = item.file_name || `download_${i + 1}`;
+    if (item._isLocked) {
+      showToast(`🔒 "${item.decryptedFileName || 'File'}" is locked (key required)`);
+      continue;
+    }
 
-    if (fileUrl) {
+    if (item.storage_path) {
       markItemAsAccessed(item.id);
-      downloadFileDirectly(fileUrl, fileNameStr);
-      // Small 150ms delay between download triggers to prevent browser popup blockers on mobile & desktop
+      await downloadDecryptedFileDirectly(item);
       if (i < itemsToDownload.length - 1) {
         await new Promise(r => setTimeout(r, 150));
       }
@@ -957,7 +1127,95 @@ async function downloadFilesConcurrently(itemsToDownload) {
   }
 }
 
-// --- Refresh Cloud Feed & Storage % Bar ---
+// Client-side in-memory decrypted file download
+async function downloadDecryptedFileDirectly(item) {
+  if (!item) return;
+
+  if (item._isLocked) {
+    openUnlockModal();
+    showToast('🔒 Key required to decrypt and download this file');
+    return;
+  }
+
+  if (!item.storage_path) {
+    if (item.decryptedContent) {
+      await copyToClipboard(item.decryptedContent, '📋 Copied text to clipboard!');
+    }
+    return;
+  }
+
+  try {
+    showToast('⏳ กำลังถอดรหัสและดาวน์โหลดไฟล์...');
+    const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
+    const blobUrl = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = blobUrl;
+    a.download = item.decryptedFileName || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    showToast('💾 ดาวน์โหลดไฟล์สำเร็จ! 🛡️');
+  } catch (err) {
+    console.error('Download error:', err);
+    showToast(`❌ ดาวน์โหลดไม่สำเร็จ: ${err.message}`);
+  }
+}
+
+// --- IntersectionObserver for Lazy Decryption of Image Thumbnails ---
+let thumbnailObserverInstance = null;
+
+function getThumbnailObserver() {
+  if (typeof IntersectionObserver === 'undefined') return null;
+  if (!thumbnailObserverInstance) {
+    thumbnailObserverInstance = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const imgEl = entry.target;
+          thumbnailObserverInstance.unobserve(imgEl);
+          const shareId = imgEl.getAttribute('data-share-id');
+          if (shareId) {
+            const item = currentSharesList.find(i => i.id === shareId);
+            if (item) {
+              loadDecryptedImageThumbnail(item, imgEl);
+            }
+          }
+        }
+      });
+    }, { rootMargin: '120px 0px' });
+  }
+  return thumbnailObserverInstance;
+}
+
+// Helper to asynchronously fetch and decrypt image thumbnail in-memory (with LRU caching)
+async function loadDecryptedImageThumbnail(item, imgElement) {
+  if (!item || !item.storage_path || !imgElement) return;
+
+  if (decryptedBlobUrlCache.has(item.storage_path)) {
+    imgElement.src = decryptedBlobUrlCache.get(item.storage_path);
+    return;
+  }
+
+  try {
+    const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
+    const objectUrl = URL.createObjectURL(blob);
+    cacheDecryptedBlobUrl(item.storage_path, objectUrl);
+    imgElement.src = objectUrl;
+  } catch (err) {
+    console.warn(`Failed to decrypt image thumbnail (${item.decryptedFileName}):`, err);
+    if (imgElement.parentElement) {
+      imgElement.parentElement.innerHTML = `<span class="cloud-thumb-icon">🖼️</span>`;
+    }
+  }
+}
+
+// --- Refresh Cloud Feed & Storage % Bar (Single-Pass & Debounced) ---
+let isRefreshingFeed = false;
+let pendingRefreshRequest = false;
+
 async function refreshAppFeed() {
   const { url, key } = getSupabaseConfig();
   if (!url || !key) {
@@ -971,9 +1229,20 @@ async function refreshAppFeed() {
     return;
   }
 
-  // 1. Storage Bar % Calculation
+  if (isRefreshingFeed) {
+    pendingRefreshRequest = true;
+    return;
+  }
+
+  isRefreshingFeed = true;
+
   try {
-    const { totalBytes } = await getStorageUsageInfo();
+    // 1. Fetch & decrypt active shares list once
+    const sharesList = await getActiveSharesList();
+    currentSharesList = sharesList || [];
+
+    // 2. Storage Bar % Calculation directly from pre-fetched list (no duplicate DB query/decryption)
+    const { totalBytes } = await getStorageUsageInfo(currentSharesList);
     const TOTAL_CAPACITY = 1000 * 1024 * 1024; // 1,000 MB (1 GB)
     const percentageNum = (totalBytes / TOTAL_CAPACITY) * 100;
     const percentage = percentageNum > 0 && percentageNum < 0.1 ? '0.1%' : `${percentageNum.toFixed(1)}%`;
@@ -989,34 +1258,15 @@ async function refreshAppFeed() {
     if (storageProgressFill) {
       storageProgressFill.style.width = `${Math.max(0, Math.min(100, percentageNum))}%`;
     }
-  } catch (err) {
-    console.error('Error calculating storage percentage:', err);
-  }
 
-  // 2. Render Cloud Feed Items
-  try {
-    if (liveFeedContainer) {
-      liveFeedContainer.innerHTML = `
-        <div class="loading-spinner-box">
-          <div class="cloud-loader">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="spin-cloud">
-              <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" stroke="#f472b6" stroke-width="2.2" stroke-dasharray="4 2"/>
-            </svg>
-            <p>Syncing cloud...</p>
-          </div>
-        </div>
-      `;
-    }
-
-    const sharesList = await getActiveSharesList();
-    currentSharesList = sharesList || [];
-
+    // 3. Update count pill
     const countPill = document.getElementById('cloud-file-count');
     if (countPill) {
       const total = currentSharesList.length;
       countPill.textContent = `${total} ${total === 1 ? 'item' : 'items'}`;
     }
 
+    // 4. Render Cloud Feed Items
     if (!currentSharesList || currentSharesList.length === 0) {
       if (liveFeedContainer) {
         liveFeedContainer.innerHTML = `
@@ -1052,25 +1302,33 @@ async function refreshAppFeed() {
         </div>
       `;
     }
+  } finally {
+    isRefreshingFeed = false;
+    if (pendingRefreshRequest) {
+      pendingRefreshRequest = false;
+      refreshAppFeed();
+    }
   }
 }
 
 // --- Render Sleek Horizontal Rectangle Items ---
 function renderCloudItemBubbles(sharesList) {
   if (!liveFeedContainer) return;
+  if (thumbnailObserverInstance) {
+    thumbnailObserverInstance.disconnect();
+  }
   liveFeedContainer.innerHTML = '';
 
   sharesList.forEach(item => {
     const cardEl = document.createElement('div');
-    cardEl.className = `cloud-item-row-card ${selectedShareIds.has(item.id) ? 'selected' : ''}`;
+    cardEl.className = `cloud-item-row-card ${item._isLocked ? 'locked' : ''} ${selectedShareIds.has(item.id) ? 'selected' : ''}`;
     cardEl.setAttribute('data-id', item.id);
 
-    const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
-    const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
-    const isFile = item.type === 'file' || item.type === 'both';
-    const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
+    const isImage = !item._isLocked && item.decryptedFileName && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.decryptedFileName);
+    const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
+    const isUrl = !item._isLocked && item.decryptedContent && /^https?:\/\/[^\s]+$/i.test(item.decryptedContent.trim());
 
-    // 0. Select Checkbox (if in select mode)
+    // 0. Select Checkbox
     let checkboxHtml = '';
     if (isSelectMode) {
       checkboxHtml = `
@@ -1082,10 +1340,16 @@ function renderCloudItemBubbles(sharesList) {
 
     // 1. Left Square Thumbnail
     let squareThumbHtml = '';
-    if (isImage && fileUrl) {
+    if (item._isLocked) {
+      squareThumbHtml = `
+        <div class="cloud-item-square-thumb" title="Click to unlock with key">
+          <div class="cloud-thumb-locked">🔒</div>
+        </div>
+      `;
+    } else if (isImage && item.storage_path) {
       squareThumbHtml = `
         <div class="cloud-item-square-thumb" title="Click for large preview">
-          <img src="${fileUrl}" alt="preview" class="cloud-thumb-img" />
+          <img src="" alt="preview" class="cloud-thumb-img decrypted-thumb-img" data-storage="${escapeHtml(item.storage_path)}" data-share-id="${escapeHtml(item.id)}" />
         </div>
       `;
     } else {
@@ -1101,14 +1365,22 @@ function renderCloudItemBubbles(sharesList) {
     }
 
     // 2. Right Info & Timestamps
-    const titleStr = item.file_name 
-      ? (item.type === 'both' ? `${item.file_name} — "${item.content.substring(0, 24)}"` : item.file_name)
-      : (item.content || 'Item');
+    let titleStr = '';
+    if (item._isLocked) {
+      titleStr = '🔒 Encrypted payload — Key required';
+    } else if (item.decryptedFileName) {
+      titleStr = item.type === 'both' && item.decryptedContent
+        ? `${item.decryptedFileName} — "${item.decryptedContent.substring(0, 24)}"`
+        : item.decryptedFileName;
+    } else {
+      titleStr = item.decryptedContent || 'Item';
+    }
+
     const shortUploadTime = formatShortTime(item.created_at);
     const remainingTimePinkStr = formatRemainingTimeClean(item.expires_at);
     const durationBadgeText = calculateConfiguredHoursText(item.created_at, item.expires_at);
 
-    // SVG Action Buttons
+    // SVG Icons
     const downloadSvgIcon = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -1131,37 +1403,39 @@ function renderCloudItemBubbles(sharesList) {
       </svg>
     `;
 
+    const keySvgIcon = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M21 2l-2 2m-1.5 1.5L14 9a5 5 0 1 0 4 4l3.5-3.5a1 1 0 0 0 0-1.42l-2.08-2.08a1 1 0 0 0-1.42 0z"/>
+      </svg>
+    `;
+
     cardEl.innerHTML = `
-      <!-- Checkbox when in Multi-Select Mode -->
       ${checkboxHtml}
-
-      <!-- Top-Right Duration Hours Badge -->
       <span class="cloud-item-duration-badge">${durationBadgeText}</span>
-
-      <!-- Left Square Thumbnail -->
       ${squareThumbHtml}
 
-      <!-- Right Info Area -->
       <div class="cloud-item-right-info">
-        <span class="cloud-item-title-text">${escapeHtml(titleStr)}</span>
+        <span class="cloud-item-title-text ${item._isLocked ? 'locked' : ''}">${escapeHtml(titleStr)}</span>
         
-        <!-- Single Combined Meta Line: Upload Time | Remaining Time -->
         <div class="cloud-item-meta-line">
           <span class="cloud-item-upload-time">${shortUploadTime}</span>
           <span class="meta-divider">|</span>
           <span class="cloud-item-remaining-pink">${remainingTimePinkStr}</span>
         </div>
         
-        <!-- Bottom-Right Small Circular SVG Action Buttons -->
         <div class="cloud-item-bottom-actions">
           <button type="button" class="icon-action-btn-danger quick-delete-btn" title="Delete">
             ${deleteSvgIcon}
           </button>
 
-          ${isFile ? `
-            <a href="#" class="icon-action-btn quick-save-btn" title="Download">
+          ${item._isLocked ? `
+            <button type="button" class="icon-action-btn quick-unlock-btn" title="Unlock with Key">
+              ${keySvgIcon}
+            </button>
+          ` : isFile ? `
+            <button type="button" class="icon-action-btn quick-save-btn" title="Download">
               ${downloadSvgIcon}
-            </a>
+            </button>
           ` : `
             <button type="button" class="icon-action-btn quick-copy-btn" title="Copy">
               ${copySvgIcon}
@@ -1171,10 +1445,23 @@ function renderCloudItemBubbles(sharesList) {
       </div>
     `;
 
+    // Asynchronously populate decrypted image thumbnail (lazy loaded via IntersectionObserver)
+    if (isImage && item.storage_path) {
+      const imgEl = cardEl.querySelector('.decrypted-thumb-img');
+      if (imgEl) {
+        const observer = getThumbnailObserver();
+        if (observer) {
+          observer.observe(imgEl);
+        } else {
+          loadDecryptedImageThumbnail(item, imgEl);
+        }
+      }
+    }
+
     // Multi-Select Card Click Handler
     if (isSelectMode) {
       cardEl.addEventListener('click', (e) => {
-        if (e.target.closest('.quick-delete-btn') || e.target.closest('.quick-save-btn') || e.target.closest('.quick-copy-btn')) {
+        if (e.target.closest('.quick-delete-btn') || e.target.closest('.quick-save-btn') || e.target.closest('.quick-copy-btn') || e.target.closest('.quick-unlock-btn')) {
           return;
         }
         if (selectedShareIds.has(item.id)) {
@@ -1185,25 +1472,47 @@ function renderCloudItemBubbles(sharesList) {
         updateBatchUI();
       });
     } else {
-      // Click on Left Square Thumbnail -> Opens Large Popup Modal
+      // Click on Card or Left Square Thumbnail
       const squareThumbEl = cardEl.querySelector('.cloud-item-square-thumb');
       if (squareThumbEl) {
         squareThumbEl.addEventListener('click', (e) => {
           e.stopPropagation();
-          openItemPreviewModal(item);
+          if (item._isLocked) {
+            openUnlockModal();
+          } else {
+            openItemPreviewModal(item);
+          }
         });
       }
+
+      cardEl.addEventListener('click', (e) => {
+        if (e.target.closest('.cloud-item-bottom-actions') || e.target.closest('.cloud-item-square-thumb')) return;
+        if (item._isLocked) {
+          openUnlockModal();
+        } else {
+          openItemPreviewModal(item);
+        }
+      });
+    }
+
+    // Quick Unlock button
+    const quickUnlockBtn = cardEl.querySelector('.quick-unlock-btn');
+    if (quickUnlockBtn) {
+      quickUnlockBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openUnlockModal();
+      });
     }
 
     // Quick Copy button
     const quickCopyBtn = cardEl.querySelector('.quick-copy-btn');
     if (quickCopyBtn) {
-      quickCopyBtn.addEventListener('click', (e) => {
+      quickCopyBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        markItemAsAccessed(item.id);
-        navigator.clipboard.writeText(item.content).then(() => {
-          showToast('📋 Copied!');
-        });
+        if (item.decryptedContent) {
+          markItemAsAccessed(item.id);
+          await copyToClipboard(item.decryptedContent, '📋 Copied!');
+        }
       });
     }
 
@@ -1214,7 +1523,7 @@ function renderCloudItemBubbles(sharesList) {
         e.preventDefault();
         e.stopPropagation();
         markItemAsAccessed(item.id);
-        downloadFileDirectly(fileUrl, item.file_name || 'download');
+        downloadDecryptedFileDirectly(item);
       });
     }
 
@@ -1224,6 +1533,7 @@ function renderCloudItemBubbles(sharesList) {
       quickDeleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+          revokeBlobUrlForPath(item.storage_path);
           const res = await deleteShareRecordAndStorage(item.id, item.storage_path);
           if (res.success) {
             showToast('🗑️ Deleted!');
@@ -1239,31 +1549,6 @@ function renderCloudItemBubbles(sharesList) {
   });
 }
 
-// Helper to download files directly via blob (avoids cross-origin redirect tabs on mobile Safari/Chrome)
-async function downloadFileDirectly(fileUrl, fileNameStr) {
-  try {
-    showToast('⏳ กําลังดาวน์โหลดไฟล์...');
-    const response = await fetch(fileUrl);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = blobUrl;
-    a.download = fileNameStr || 'download';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-    showToast('💾 ดาวน์โหลดไฟล์สำเร็จ!');
-  } catch (err) {
-    console.warn('Direct blob download failed, opening direct URL:', err);
-    window.open(fileUrl, '_blank');
-  }
-}
-
 // --- Item Preview Modal Handlers ---
 function initItemModal() {
   if (!closeItemModalBtn) return;
@@ -1272,35 +1557,31 @@ function initItemModal() {
     if (e.target === itemModal) closeItemModal();
   });
 
-  modalCopyBtn.addEventListener('click', () => {
-    if (currentActiveItem && currentActiveItem.content) {
+  modalCopyBtn.addEventListener('click', async () => {
+    if (currentActiveItem && currentActiveItem.decryptedContent) {
       markItemAsAccessed(currentActiveItem.id);
-      navigator.clipboard.writeText(currentActiveItem.content).then(() => {
-        showToast('📋 Copied!');
-      });
+      await copyToClipboard(currentActiveItem.decryptedContent, '📋 Copied!');
     }
   });
 
   modalDownloadBtn.addEventListener('click', (e) => {
     e.preventDefault();
     if (currentActiveItem) {
-      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.content;
-      if (fileUrl) {
-        markItemAsAccessed(currentActiveItem.id);
-        downloadFileDirectly(fileUrl, currentActiveItem.file_name || 'download');
-      }
+      markItemAsAccessed(currentActiveItem.id);
+      downloadDecryptedFileDirectly(currentActiveItem);
     }
   });
 
   modalShareBtn.addEventListener('click', () => {
     if (currentActiveItem) {
-      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.content;
+      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.decryptedContent;
       openQrModal(fileUrl || window.location.href);
     }
   });
 
   modalDeleteBtn.addEventListener('click', async () => {
     if (currentActiveItem && confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+      revokeBlobUrlForPath(currentActiveItem.storage_path);
       const res = await deleteShareRecordAndStorage(currentActiveItem.id, currentActiveItem.storage_path);
       if (res.success) {
         showToast('🗑️ Deleted!');
@@ -1313,13 +1594,12 @@ function initItemModal() {
   });
 }
 
-function openItemPreviewModal(item) {
+async function openItemPreviewModal(item) {
   currentActiveItem = item;
-  const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
 
   modalItemBadge.textContent = item.type === 'both' ? 'Message + File' : item.type === 'file' ? 'File' : 'Message / Link';
   if (modalFileName) {
-    modalFileName.textContent = item.file_name || (item.content ? item.content.substring(0, 30) : 'Item');
+    modalFileName.textContent = item.decryptedFileName || (item.decryptedContent ? item.decryptedContent.substring(0, 30) : 'Item');
   }
 
   modalPreviewArea.innerHTML = '';
@@ -1328,37 +1608,49 @@ function openItemPreviewModal(item) {
   modalOpenLinkBtn.classList.add('hidden');
   modalDownloadBtn.classList.add('hidden');
 
-  const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
-  const isFile = item.type === 'file' || item.type === 'both';
-  const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
+  const isImage = item.decryptedFileName && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.decryptedFileName);
+  const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
+  const isUrl = item.decryptedContent && /^https?:\/\/[^\s]+$/i.test(item.decryptedContent.trim());
 
-  // Image Preview Thumbnail inside Modal
-  if (isImage && fileUrl) {
-    modalPreviewArea.innerHTML = `<img src="${fileUrl}" alt="preview" class="modal-img-preview" />`;
+  // Image Preview inside Modal
+  if (isImage && item.storage_path) {
+    modalPreviewArea.innerHTML = `<div class="loading-spinner-box"><p>Decrypting image preview...</p></div>`;
+    itemModal.classList.remove('hidden');
+
+    try {
+      let objectUrl = decryptedBlobUrlCache.get(item.storage_path);
+      if (!objectUrl) {
+        const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
+        objectUrl = URL.createObjectURL(blob);
+        decryptedBlobUrlCache.set(item.storage_path, objectUrl);
+      }
+      modalPreviewArea.innerHTML = `<img src="${objectUrl}" alt="preview" class="modal-img-preview" />`;
+    } catch (err) {
+      modalPreviewArea.innerHTML = `<p style="color: var(--danger-red);">⚠️ Failed to decrypt image preview: ${err.message}</p>`;
+    }
   } else if (isFile) {
-    const fileNameStr = item.file_name || 'File';
-    const fileSizeStr = item.file_size ? formatBytes(item.file_size) : '';
+    const fileNameStr = item.decryptedFileName || 'File';
+    const fileSizeStr = item.decryptedFileSize ? formatBytes(item.decryptedFileSize) : (item.file_size ? formatBytes(item.file_size) : '');
     modalPreviewArea.innerHTML = `
       <div style="font-size: 3rem; margin-bottom: 4px;">📁</div>
       <p style="font-size: 0.95rem; font-weight: 700;">${escapeHtml(fileNameStr)}</p>
-      ${fileSizeStr ? `<p style="font-size: 0.78rem; color: #6b7280;">${fileSizeStr}</p>` : ''}
+      ${fileSizeStr ? `<p style="font-size: 0.78rem; color: #6b7280;">${fileSizeStr} (E2EE 🛡️)</p>` : ''}
     `;
   }
 
   // Text Content Display
-  if (item.content && (item.type === 'text' || item.type === 'both')) {
-    modalTextContent.textContent = item.content;
+  if (item.decryptedContent && (item.type === 'text' || item.type === 'both')) {
+    modalTextContent.textContent = item.decryptedContent;
     modalTextContent.classList.remove('hidden');
     modalCopyBtn.classList.remove('hidden');
 
     if (isUrl) {
-      modalOpenLinkBtn.href = item.content;
+      modalOpenLinkBtn.href = item.decryptedContent;
       modalOpenLinkBtn.classList.remove('hidden');
     }
   }
 
-  // Download Button for files
-  if (isFile && fileUrl) {
+  if (isFile) {
     modalDownloadBtn.classList.remove('hidden');
   }
 
@@ -1377,7 +1669,9 @@ function escapeHtml(str) {
   );
 }
 
-// --- QR Modal Handlers (Pink QR Code + Bunny Mascot Logo + Native Gallery Share) ---
+// --- QR Modal Handlers ---
+let currentQrUrl = null;
+
 function initQrModal() {
   if (!closeQrModalBtn) return;
   closeQrModalBtn.addEventListener('click', closeQrModal);
@@ -1387,11 +1681,14 @@ function initQrModal() {
 
   if (qrNativeShareBtn) {
     qrNativeShareBtn.addEventListener('click', async () => {
-      const urlToShare = (currentActiveItem && currentActiveItem.content) ? currentActiveItem.content : window.location.href;
-      const shareTitle = 'UpMee 🐰';
-      const shareText = (currentActiveItem && currentActiveItem.file_name) 
-        ? `UpMee File: ${currentActiveItem.file_name}`
-        : 'UpMee Share';
+      const urlToShare = currentQrUrl || (currentActiveItem && currentActiveItem.decryptedContent) || window.location.href;
+      const isPairingLink = urlToShare.includes('#key=') || urlToShare.includes('?key=');
+      const shareTitle = isPairingLink ? 'UpMee E2EE Pairing Key' : 'UpMee 🐰';
+      const shareText = isPairingLink 
+        ? 'Sync your UpMe encryption key on another device' 
+        : (currentActiveItem && currentActiveItem.decryptedFileName) 
+          ? `UpMee File: ${currentActiveItem.decryptedFileName}`
+          : 'UpMee Share';
 
       if (navigator.share) {
         try {
@@ -1402,24 +1699,24 @@ function initQrModal() {
           });
         } catch (err) {
           if (err.name !== 'AbortError') {
-            showToast(`❌ Share error: ${err.message}`);
+            await copyToClipboard(urlToShare, '📋 Copied link to clipboard!');
           }
         }
       } else {
-        navigator.clipboard.writeText(urlToShare).then(() => {
-          showToast('📋 คัดลอกลิงก์ไปยังคลิปบอร์ดแล้ว!');
-        });
+        await copyToClipboard(urlToShare, '📋 Copied link to clipboard!');
       }
     });
   }
 }
 
 function openQrModal(urlToEncode) {
+  currentQrUrl = urlToEncode;
   QRCode.toCanvas(qrModalCanvas, urlToEncode, {
     width: 200,
     margin: 2,
+    errorCorrectionLevel: 'H',
     color: {
-      dark: '#ec4899', // Pink theme color!
+      dark: '#ec4899',
       light: '#ffffff'
     }
   }, (err) => {
@@ -1428,22 +1725,22 @@ function openQrModal(urlToEncode) {
       return;
     }
 
-    // Draw Bunny mascot logo in the center of the QR Code
     const ctx = qrModalCanvas.getContext('2d');
     const logo = new Image();
     logo.src = '/bunny_mascot.png';
     logo.onload = () => {
-      const logoSize = qrModalCanvas.width * 0.24; // 24% width of QR
+      const logoSize = qrModalCanvas.width * 0.24;
       const center = (qrModalCanvas.width - logoSize) / 2;
 
-      // Draw white background circle behind logo
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(qrModalCanvas.width / 2, qrModalCanvas.height / 2, logoSize / 2 + 4, 0, Math.PI * 2);
       ctx.fill();
 
-      // Draw Bunny Logo Image
       ctx.drawImage(logo, center, center, logoSize, logoSize);
+    };
+    logo.onerror = () => {
+      console.warn('Bunny mascot logo could not be loaded for QR overlay');
     };
   });
 
@@ -1452,36 +1749,184 @@ function openQrModal(urlToEncode) {
 
 function closeQrModal() {
   if (qrModal) qrModal.classList.add('hidden');
+  currentQrUrl = null;
+}
+
+// --- Unlock Key Required Modal ---
+function initUnlockModal() {
+  if (closeUnlockModalBtn) {
+    closeUnlockModalBtn.addEventListener('click', closeUnlockModal);
+  }
+  if (unlockModal) {
+    unlockModal.addEventListener('click', (e) => {
+      if (e.target === unlockModal) closeUnlockModal();
+    });
+  }
+
+  if (unlockOpenSettingsBtn) {
+    unlockOpenSettingsBtn.addEventListener('click', () => {
+      closeUnlockModal();
+      openSettingsModal();
+    });
+  }
+
+  if (unlockSubmitBtn) {
+    unlockSubmitBtn.addEventListener('click', async () => {
+      const inputVal = unlockPassphraseInput ? unlockPassphraseInput.value.trim() : '';
+      if (!inputVal) {
+        showToast('⚠️ กรุณาระบุ Passphrase หรือ Base64 Key');
+        return;
+      }
+
+      try {
+        await applyKeyOrPassphrase(inputVal);
+        clearDecryptedBlobCache();
+        await updateE2EEUI();
+        showToast('🔓 Key applied! Decrypting vault...');
+        closeUnlockModal();
+        await refreshAppFeed();
+      } catch (err) {
+        showToast(`❌ Invalid key/passphrase: ${err.message}`);
+      }
+    });
+  }
+}
+
+function openUnlockModal() {
+  if (unlockModal) {
+    if (unlockPassphraseInput) unlockPassphraseInput.value = '';
+    unlockModal.classList.remove('hidden');
+  }
+}
+
+function closeUnlockModal() {
+  if (unlockModal) unlockModal.classList.add('hidden');
 }
 
 // --- Settings Modal Handlers ---
 function initSettingsModal() {
-  if (!settingsBtn) return;
-  settingsBtn.addEventListener('click', openSettingsModal);
-  closeModalBtn.addEventListener('click', closeModalBtnHandler);
+  if (headerE2eeBadge) {
+    headerE2eeBadge.addEventListener('click', openSettingsModal);
+  }
 
-  configModal.addEventListener('click', (e) => {
-    if (e.target === configModal) closeModalBtnHandler();
-  });
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', openSettingsModal);
+  }
 
-  saveConfigBtn.addEventListener('click', () => {
-    const url = cfgUrl.value.trim();
-    const key = cfgKey.value.trim();
-    if (!url || !key) {
-      showToast('❌ Please fill in both URL and Anon Key');
-      return;
-    }
-    saveSupabaseConfig(url, key);
-    showToast('💖 Saved!');
-    closeModalBtnHandler();
-    refreshAppFeed();
-  });
+  if (closeModalBtn) {
+    closeModalBtn.addEventListener('click', closeModalBtnHandler);
+  }
+
+  if (configModal) {
+    configModal.addEventListener('click', (e) => {
+      if (e.target === configModal) closeModalBtnHandler();
+    });
+  }
+
+  // Set Master Passphrase Button
+  if (setPassphraseBtn) {
+    setPassphraseBtn.addEventListener('click', async () => {
+      const pass = cfgPassphrase ? cfgPassphrase.value.trim() : '';
+      if (!pass) {
+        showToast('⚠️ กรุณาระบุ Passphrase หรือ Base64 Key');
+        return;
+      }
+      try {
+        const result = await applyKeyOrPassphrase(pass);
+        clearDecryptedBlobCache();
+        await updateE2EEUI();
+        if (result.type === 'base64_key' || result.type === 'hex_key') {
+          showToast('🔑 Key imported & activated! 🛡️');
+        } else {
+          showToast('🔑 Master Passphrase set & derived successfully! 🛡️');
+        }
+        await refreshAppFeed();
+      } catch (err) {
+        showToast(`❌ Error setting passphrase: ${err.message}`);
+      }
+    });
+  }
+
+  // Copy Pairing Link
+  if (copyPairingLinkBtn) {
+    copyPairingLinkBtn.addEventListener('click', async () => {
+      try {
+        const url = await getPairingUrl();
+        if (!url) throw new Error('No active key to export');
+        await copyToClipboard(url, '🔗 Pairing Link copied! Open on other device to sync.');
+      } catch (err) {
+        showToast(`❌ Copy failed: ${err.message}`);
+      }
+    });
+  }
+
+  // Show Pairing QR Code
+  if (showPairingQrBtn) {
+    showPairingQrBtn.addEventListener('click', async () => {
+      try {
+        const url = await getPairingUrl();
+        if (!url) throw new Error('No active key to export');
+        openQrModal(url);
+      } catch (err) {
+        showToast(`❌ QR failed: ${err.message}`);
+      }
+    });
+  }
+
+  // Copy Raw Base64 Key
+  if (copyRawKeyBtn) {
+    copyRawKeyBtn.addEventListener('click', async () => {
+      try {
+        const key = getActiveCryptoKey();
+        if (!key) throw new Error('No active key');
+        const b64 = await exportKeyToBase64(key);
+        await copyToClipboard(b64, '📋 Base64 Encryption Key copied!');
+      } catch (err) {
+        showToast(`❌ Copy failed: ${err.message}`);
+      }
+    });
+  }
+
+  // Generate New Random Key
+  if (generateNewKeyBtn) {
+    generateNewKeyBtn.addEventListener('click', async () => {
+      if (confirm('Generate a brand new random AES-256 key?\n\nNote: You will need your previous key/passphrase to decrypt items uploaded previously.')) {
+        try {
+          const newKey = await generateRandomKey();
+          await saveEncryptionKey(newKey);
+          clearDecryptedBlobCache();
+          await updateE2EEUI();
+          showToast('🔑 New 256-bit Key Generated & Activated! 🛡️');
+          await refreshAppFeed();
+        } catch (err) {
+          showToast(`❌ Error: ${err.message}`);
+        }
+      }
+    });
+  }
+
+  // Save Supabase Settings
+  if (saveConfigBtn) {
+    saveConfigBtn.addEventListener('click', () => {
+      const url = cfgUrl.value.trim();
+      const key = cfgKey.value.trim();
+      if (!url || !key) {
+        showToast('❌ Please fill in both URL and Anon Key');
+        return;
+      }
+      saveSupabaseConfig(url, key);
+      showToast('💖 Settings Saved!');
+      closeModalBtnHandler();
+      refreshAppFeed();
+    });
+  }
 }
 
 function openSettingsModal() {
   const { url, key } = getSupabaseConfig();
   if (cfgUrl) cfgUrl.value = url;
   if (cfgKey) cfgKey.value = key;
+  updateE2EEUI();
   if (configModal) configModal.classList.remove('hidden');
 }
 

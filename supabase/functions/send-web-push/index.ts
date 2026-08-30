@@ -39,9 +39,22 @@ serve(async (req) => {
 
     console.log(`Sending Web Push to ${subs.length} registered devices...`);
 
+    const isEncrypted = typeof newRecord.content === 'string' && (
+      newRecord.content.startsWith('{"v":1,"e2ee":true') ||
+      newRecord.file_name === '[E2EE Encrypted File]'
+    );
+    let bodyText = 'มีรายการใหม่ฝากไว้บน UpMee';
+    if (isEncrypted) {
+      bodyText = '🔒 ได้รับรายการใหม่ (เข้ารหัส E2EE)';
+    } else if (newRecord.file_name) {
+      bodyText = `ไฟล์ใหม่: ${newRecord.file_name}`;
+    } else if (newRecord.content) {
+      bodyText = `ข้อความใหม่: ${newRecord.content.substring(0, 40)}`;
+    }
+
     const pushPayload = JSON.stringify({
       title: "UpMee 🐰 มีไฟล์/ข้อความใหม่!",
-      body: newRecord.file_name ? `ไฟล์ใหม่: ${newRecord.file_name}` : `ข้อความใหม่: ${newRecord.content?.substring(0, 40)}`,
+      body: bodyText,
       icon: "/bunny_mascot.png",
       url: "/"
     });

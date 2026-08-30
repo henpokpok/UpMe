@@ -35,6 +35,10 @@
       <div class="logo-area">
         <img src="/bunny_mascot.png" alt="UpMee Bunny Mascot" class="bunny-logo-img" />
         <span class="logo-text">UpMee</span>
+        <div id="header-e2ee-badge" class="e2ee-header-badge protected" title="AES-GCM 256-bit Zero-Knowledge Encryption Active">
+          <span class="e2ee-icon">🛡️</span>
+          <span class="e2ee-text">E2EE Protected</span>
+        </div>
       </div>
 
       <div class="header-actions">
@@ -284,7 +288,7 @@
 
     </main>
 
-    <!-- Supabase Config Modal -->
+    <!-- Supabase Config & E2EE Settings Modal -->
     <div id="config-modal" class="modal-backdrop hidden">
       <div class="modal-card">
         <div class="modal-header">
@@ -292,17 +296,75 @@
           <button id="close-modal-btn" class="close-btn">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="form-group">
-            <label for="cfg-url">Supabase Project URL</label>
-            <input type="text" id="cfg-url" placeholder="https://your-project.supabase.co" />
+          <!-- E2EE Zero-Knowledge Encryption Section -->
+          <div class="settings-section">
+            <h4 class="settings-section-title">🛡️ End-to-End Encryption (E2EE)</h4>
+            
+            <div class="e2ee-key-status-box">
+              <div class="e2ee-status-row">
+                <span id="settings-e2ee-badge" class="e2ee-status-pill protected">🛡️ AES-GCM 256-bit Active</span>
+                <span id="settings-key-fingerprint" class="key-fingerprint-pill">Key: #----</span>
+              </div>
+              <p class="e2ee-hint-text">Messages, files, and metadata are encrypted client-side in your browser before uploading to cloud.</p>
+            </div>
+
+            <div class="form-group">
+              <label for="cfg-passphrase">Master Passphrase (PBKDF2 SHA-256)</label>
+              <div class="input-with-action">
+                <input type="password" id="cfg-passphrase" placeholder="Enter passphrase to derive key..." />
+                <button type="button" id="set-passphrase-btn" class="secondary-btn-sm">Set</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Device Pairing & Key Sync</label>
+              <div class="e2ee-actions-grid">
+                <button type="button" id="copy-pairing-link-btn" class="e2ee-action-btn" title="Copy URL with #key=...">🔗 Copy Pairing Link</button>
+                <button type="button" id="show-pairing-qr-btn" class="e2ee-action-btn" title="Show Pairing QR Code">📱 Scan Pairing QR</button>
+                <button type="button" id="copy-raw-key-btn" class="e2ee-action-btn" title="Copy raw Base64 Key">📋 Copy Base64 Key</button>
+                <button type="button" id="generate-new-key-btn" class="e2ee-action-btn danger" title="Generate New Random Key">🔑 New Key</button>
+              </div>
+            </div>
           </div>
-          <div class="form-group">
-            <label for="cfg-key">Supabase Anon Key</label>
-            <input type="password" id="cfg-key" placeholder="eyJhbGciOiJIUzI1NiIsIn..." />
+
+          <!-- Supabase Connection Section -->
+          <div class="settings-section" style="margin-top: 14px; border-top: 1px dashed rgba(244, 114, 182, 0.25); padding-top: 14px;">
+            <h4 class="settings-section-title">☁️ Supabase Connection</h4>
+            <div class="form-group">
+              <label for="cfg-url">Supabase Project URL</label>
+              <input type="text" id="cfg-url" placeholder="https://your-project.supabase.co" />
+            </div>
+            <div class="form-group">
+              <label for="cfg-key">Supabase Anon Key</label>
+              <input type="password" id="cfg-key" placeholder="eyJhbGciOiJIUzI1NiIsIn..." />
+            </div>
           </div>
         </div>
         <div class="modal-footer">
           <button id="save-config-btn" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unlock Key Required Modal -->
+    <div id="unlock-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>🔒 Key Required</h3>
+          <button id="close-unlock-modal-btn" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size: 0.88rem; color: #475569; margin-bottom: 14px; line-height: 1.45;">
+            This payload is encrypted with AES-GCM 256-bit zero-knowledge encryption. Enter your master passphrase or import your encryption key to unlock.
+          </p>
+          <div class="form-group">
+            <label for="unlock-passphrase-input">Master Passphrase or Base64 Key</label>
+            <input type="password" id="unlock-passphrase-input" placeholder="Enter passphrase or paste key..." />
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; gap: 8px;">
+          <button type="button" id="unlock-submit-btn" class="primary-btn" style="flex: 1;">Unlock 🔓</button>
+          <button type="button" id="unlock-open-settings-btn" class="secondary-btn" style="padding: 10px 14px;">⚙️ Settings</button>
         </div>
       </div>
     </div>
