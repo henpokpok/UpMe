@@ -54,10 +54,10 @@ test('Reviewer Round 3: Text-only item decryptedFileName is null, not "File"', a
   assert.strictEqual(decrypted.decryptedFileName, null, 'Text-only item decryptedFileName must be null, not "File"');
   assert.strictEqual(decrypted.decryptedMimeType, null);
 
-  // 2. Locked text item (no key provided)
-  const lockedDecrypted = await decryptShareRecord(rawTextRecord, null);
-  assert.strictEqual(lockedDecrypted._isLocked, true);
-  assert.strictEqual(lockedDecrypted.decryptedFileName, null, 'Locked text item without storage_path should not have fileName "🔒 Encrypted File"');
+  // 2. Frictionless text item (no key provided - no locking)
+  const unlockedDecrypted = await decryptShareRecord(rawTextRecord, null);
+  assert.strictEqual(unlockedDecrypted._isLocked, false);
+  assert.strictEqual(unlockedDecrypted.decryptedFileName, null);
 });
 
 test('Reviewer Round 3: Extended MIME type inference for modern media and office documents', () => {

@@ -187,21 +187,6 @@ const saveConfigBtn = document.getElementById('save-config-btn');
 const cfgUrl = document.getElementById('cfg-url');
 const cfgKey = document.getElementById('cfg-key');
 
-const settingsE2eeBadge = document.getElementById('settings-e2ee-badge');
-const settingsKeyFingerprint = document.getElementById('settings-key-fingerprint');
-const cfgPassphrase = document.getElementById('cfg-passphrase');
-const setPassphraseBtn = document.getElementById('set-passphrase-btn');
-const copyPairingLinkBtn = document.getElementById('copy-pairing-link-btn');
-const showPairingQrBtn = document.getElementById('show-pairing-qr-btn');
-const copyRawKeyBtn = document.getElementById('copy-raw-key-btn');
-const generateNewKeyBtn = document.getElementById('generate-new-key-btn');
-
-const unlockModal = document.getElementById('unlock-modal');
-const closeUnlockModalBtn = document.getElementById('close-unlock-modal-btn');
-const unlockPassphraseInput = document.getElementById('unlock-passphrase-input');
-const unlockSubmitBtn = document.getElementById('unlock-submit-btn');
-const unlockOpenSettingsBtn = document.getElementById('unlock-open-settings-btn');
-
 const itemModal = document.getElementById('item-modal');
 const closeItemModalBtn = document.getElementById('close-item-modal-btn');
 const modalItemBadge = document.getElementById('modal-item-badge');
@@ -223,29 +208,16 @@ const pwaInstallBtn = document.getElementById('pwa-install-btn');
 const toast = document.getElementById('toast');
 
 // --- Initialization ---
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
   initHistoryPopover();
   initPills();
   initDropzone();
   initForms();
   initBatchActions();
   initSettingsModal();
-  initUnlockModal();
   initItemModal();
   initQrModal();
   initPWA();
-
-  // Initialize E2EE Key (from URL hash pairing, localStorage, or auto-generate)
-  try {
-    const initResult = await initializeEncryptionKey();
-    await updateE2EEUI();
-    if (initResult && initResult.paired) {
-      showToast('🔑 Encryption key paired & synced successfully!');
-    }
-  } catch (err) {
-    console.warn('E2EE initialization note:', err);
-    await updateE2EEUI();
-  }
   
   refreshAppFeed();
   initRealtimeSubscription();
@@ -272,46 +244,6 @@ function debouncedRefreshAppFeed(delay = 300) {
   feedDebounceTimer = setTimeout(() => {
     refreshAppFeed();
   }, delay);
-}
-
-// Update E2EE Status Badges and Key Fingerprints in UI
-async function updateE2EEUI() {
-  const key = getActiveCryptoKey();
-
-  if (key) {
-    const fingerprint = await getKeyFingerprint(key);
-    if (headerE2eeBadge) {
-      headerE2eeBadge.className = 'e2ee-header-badge protected';
-      headerE2eeBadge.innerHTML = `<span class="e2ee-icon">🛡️</span><span class="e2ee-text">E2EE Protected</span>`;
-      headerE2eeBadge.title = `AES-GCM 256-bit E2EE Active (Key ID: #${fingerprint})`;
-    }
-    if (settingsE2eeBadge) {
-      settingsE2eeBadge.className = 'e2ee-status-pill protected';
-      settingsE2eeBadge.textContent = '🛡️ AES-GCM 256-bit Active';
-    }
-    if (settingsKeyFingerprint) {
-      settingsKeyFingerprint.textContent = `Key: #${fingerprint}`;
-      settingsKeyFingerprint.classList.remove('hidden');
-    }
-  } else {
-    if (headerE2eeBadge) {
-      headerE2eeBadge.className = 'e2ee-header-badge locked';
-      headerE2eeBadge.innerHTML = `<span class="e2ee-icon">⚠️</span><span class="e2ee-text">Key Required</span>`;
-      headerE2eeBadge.title = 'Encryption key required to decrypt data';
-    }
-    if (settingsE2eeBadge) {
-      settingsE2eeBadge.className = 'e2ee-status-pill locked';
-      settingsE2eeBadge.textContent = '🔒 Key Required';
-    }
-    if (settingsKeyFingerprint) {
-      settingsKeyFingerprint.textContent = 'Key: None';
-    }
-  }
-
-  // Populate stored passphrase if available
-  if (cfgPassphrase && typeof localStorage !== 'undefined') {
-    cfgPassphrase.value = localStorage.getItem(STORAGE_E2EE_PASSPHRASE) || '';
-  }
 }
 
 // Helper to load shared images/files sent directly from phone's Gallery Share Menu
@@ -1311,7 +1243,7 @@ async function refreshAppFeed() {
   }
 }
 
-// --- Render Sleek Horizontal Rectangle Items ---
+// --- Render Sleek Horizontal Rectangle Items (Instant 1-Click Access) ---
 function renderCloudItemBubbles(sharesList) {
   if (!liveFeedContainer) return;
   if (thumbnailObserverInstance) {
@@ -1321,12 +1253,12 @@ function renderCloudItemBubbles(sharesList) {
 
   sharesList.forEach(item => {
     const cardEl = document.createElement('div');
-    cardEl.className = `cloud-item-row-card ${item._isLocked ? 'locked' : ''} ${selectedShareIds.has(item.id) ? 'selected' : ''}`;
+    cardEl.className = `cloud-item-row-card ${selectedShareIds.has(item.id) ? 'selected' : ''}`;
     cardEl.setAttribute('data-id', item.id);
 
-    const isImage = !item._isLocked && item.decryptedFileName && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.decryptedFileName);
+    const isImage = item.decryptedFileName && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.decryptedFileName);
     const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
-    const isUrl = !item._isLocked && item.decryptedContent && /^https?:\/\/[^\s]+$/i.test(item.decryptedContent.trim());
+    const isUrl = item.decryptedContent && /^https?:\/\/[^\s]+$/i.test(item.decryptedContent.trim());
 
     // 0. Select Checkbox
     let checkboxHtml = '';
@@ -1340,13 +1272,7 @@ function renderCloudItemBubbles(sharesList) {
 
     // 1. Left Square Thumbnail
     let squareThumbHtml = '';
-    if (item._isLocked) {
-      squareThumbHtml = `
-        <div class="cloud-item-square-thumb" title="Click to unlock with key">
-          <div class="cloud-thumb-locked">🔒</div>
-        </div>
-      `;
-    } else if (isImage && item.storage_path) {
+    if (isImage && item.storage_path) {
       squareThumbHtml = `
         <div class="cloud-item-square-thumb" title="Click for large preview">
           <img src="" alt="preview" class="cloud-thumb-img decrypted-thumb-img" data-storage="${escapeHtml(item.storage_path)}" data-share-id="${escapeHtml(item.id)}" />
@@ -1366,9 +1292,7 @@ function renderCloudItemBubbles(sharesList) {
 
     // 2. Right Info & Timestamps
     let titleStr = '';
-    if (item._isLocked) {
-      titleStr = '🔒 Encrypted payload — Key required';
-    } else if (item.decryptedFileName) {
+    if (item.decryptedFileName) {
       titleStr = item.type === 'both' && item.decryptedContent
         ? `${item.decryptedFileName} — "${item.decryptedContent.substring(0, 24)}"`
         : item.decryptedFileName;
@@ -1403,19 +1327,13 @@ function renderCloudItemBubbles(sharesList) {
       </svg>
     `;
 
-    const keySvgIcon = `
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-        <path d="M21 2l-2 2m-1.5 1.5L14 9a5 5 0 1 0 4 4l3.5-3.5a1 1 0 0 0 0-1.42l-2.08-2.08a1 1 0 0 0-1.42 0z"/>
-      </svg>
-    `;
-
     cardEl.innerHTML = `
       ${checkboxHtml}
       <span class="cloud-item-duration-badge">${durationBadgeText}</span>
       ${squareThumbHtml}
 
       <div class="cloud-item-right-info">
-        <span class="cloud-item-title-text ${item._isLocked ? 'locked' : ''}">${escapeHtml(titleStr)}</span>
+        <span class="cloud-item-title-text">${escapeHtml(titleStr)}</span>
         
         <div class="cloud-item-meta-line">
           <span class="cloud-item-upload-time">${shortUploadTime}</span>
@@ -1428,11 +1346,7 @@ function renderCloudItemBubbles(sharesList) {
             ${deleteSvgIcon}
           </button>
 
-          ${item._isLocked ? `
-            <button type="button" class="icon-action-btn quick-unlock-btn" title="Unlock with Key">
-              ${keySvgIcon}
-            </button>
-          ` : isFile ? `
+          ${isFile ? `
             <button type="button" class="icon-action-btn quick-save-btn" title="Download">
               ${downloadSvgIcon}
             </button>
@@ -1461,7 +1375,7 @@ function renderCloudItemBubbles(sharesList) {
     // Multi-Select Card Click Handler
     if (isSelectMode) {
       cardEl.addEventListener('click', (e) => {
-        if (e.target.closest('.quick-delete-btn') || e.target.closest('.quick-save-btn') || e.target.closest('.quick-copy-btn') || e.target.closest('.quick-unlock-btn')) {
+        if (e.target.closest('.quick-delete-btn') || e.target.closest('.quick-save-btn') || e.target.closest('.quick-copy-btn')) {
           return;
         }
         if (selectedShareIds.has(item.id)) {
@@ -1477,30 +1391,13 @@ function renderCloudItemBubbles(sharesList) {
       if (squareThumbEl) {
         squareThumbEl.addEventListener('click', (e) => {
           e.stopPropagation();
-          if (item._isLocked) {
-            openUnlockModal();
-          } else {
-            openItemPreviewModal(item);
-          }
+          openItemPreviewModal(item);
         });
       }
 
       cardEl.addEventListener('click', (e) => {
         if (e.target.closest('.cloud-item-bottom-actions') || e.target.closest('.cloud-item-square-thumb')) return;
-        if (item._isLocked) {
-          openUnlockModal();
-        } else {
-          openItemPreviewModal(item);
-        }
-      });
-    }
-
-    // Quick Unlock button
-    const quickUnlockBtn = cardEl.querySelector('.quick-unlock-btn');
-    if (quickUnlockBtn) {
-      quickUnlockBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openUnlockModal();
+        openItemPreviewModal(item);
       });
     }
 
@@ -1752,63 +1649,8 @@ function closeQrModal() {
   currentQrUrl = null;
 }
 
-// --- Unlock Key Required Modal ---
-function initUnlockModal() {
-  if (closeUnlockModalBtn) {
-    closeUnlockModalBtn.addEventListener('click', closeUnlockModal);
-  }
-  if (unlockModal) {
-    unlockModal.addEventListener('click', (e) => {
-      if (e.target === unlockModal) closeUnlockModal();
-    });
-  }
-
-  if (unlockOpenSettingsBtn) {
-    unlockOpenSettingsBtn.addEventListener('click', () => {
-      closeUnlockModal();
-      openSettingsModal();
-    });
-  }
-
-  if (unlockSubmitBtn) {
-    unlockSubmitBtn.addEventListener('click', async () => {
-      const inputVal = unlockPassphraseInput ? unlockPassphraseInput.value.trim() : '';
-      if (!inputVal) {
-        showToast('⚠️ กรุณาระบุ Passphrase หรือ Base64 Key');
-        return;
-      }
-
-      try {
-        await applyKeyOrPassphrase(inputVal);
-        clearDecryptedBlobCache();
-        await updateE2EEUI();
-        showToast('🔓 Key applied! Decrypting vault...');
-        closeUnlockModal();
-        await refreshAppFeed();
-      } catch (err) {
-        showToast(`❌ Invalid key/passphrase: ${err.message}`);
-      }
-    });
-  }
-}
-
-function openUnlockModal() {
-  if (unlockModal) {
-    if (unlockPassphraseInput) unlockPassphraseInput.value = '';
-    unlockModal.classList.remove('hidden');
-  }
-}
-
-function closeUnlockModal() {
-  if (unlockModal) unlockModal.classList.add('hidden');
-}
-
 // --- Settings Modal Handlers ---
 function initSettingsModal() {
-  if (headerE2eeBadge) {
-    headerE2eeBadge.addEventListener('click', openSettingsModal);
-  }
-
   if (settingsBtn) {
     settingsBtn.addEventListener('click', openSettingsModal);
   }
@@ -1820,88 +1662,6 @@ function initSettingsModal() {
   if (configModal) {
     configModal.addEventListener('click', (e) => {
       if (e.target === configModal) closeModalBtnHandler();
-    });
-  }
-
-  // Set Master Passphrase Button
-  if (setPassphraseBtn) {
-    setPassphraseBtn.addEventListener('click', async () => {
-      const pass = cfgPassphrase ? cfgPassphrase.value.trim() : '';
-      if (!pass) {
-        showToast('⚠️ กรุณาระบุ Passphrase หรือ Base64 Key');
-        return;
-      }
-      try {
-        const result = await applyKeyOrPassphrase(pass);
-        clearDecryptedBlobCache();
-        await updateE2EEUI();
-        if (result.type === 'base64_key' || result.type === 'hex_key') {
-          showToast('🔑 Key imported & activated! 🛡️');
-        } else {
-          showToast('🔑 Master Passphrase set & derived successfully! 🛡️');
-        }
-        await refreshAppFeed();
-      } catch (err) {
-        showToast(`❌ Error setting passphrase: ${err.message}`);
-      }
-    });
-  }
-
-  // Copy Pairing Link
-  if (copyPairingLinkBtn) {
-    copyPairingLinkBtn.addEventListener('click', async () => {
-      try {
-        const url = await getPairingUrl();
-        if (!url) throw new Error('No active key to export');
-        await copyToClipboard(url, '🔗 Pairing Link copied! Open on other device to sync.');
-      } catch (err) {
-        showToast(`❌ Copy failed: ${err.message}`);
-      }
-    });
-  }
-
-  // Show Pairing QR Code
-  if (showPairingQrBtn) {
-    showPairingQrBtn.addEventListener('click', async () => {
-      try {
-        const url = await getPairingUrl();
-        if (!url) throw new Error('No active key to export');
-        openQrModal(url);
-      } catch (err) {
-        showToast(`❌ QR failed: ${err.message}`);
-      }
-    });
-  }
-
-  // Copy Raw Base64 Key
-  if (copyRawKeyBtn) {
-    copyRawKeyBtn.addEventListener('click', async () => {
-      try {
-        const key = getActiveCryptoKey();
-        if (!key) throw new Error('No active key');
-        const b64 = await exportKeyToBase64(key);
-        await copyToClipboard(b64, '📋 Base64 Encryption Key copied!');
-      } catch (err) {
-        showToast(`❌ Copy failed: ${err.message}`);
-      }
-    });
-  }
-
-  // Generate New Random Key
-  if (generateNewKeyBtn) {
-    generateNewKeyBtn.addEventListener('click', async () => {
-      if (confirm('Generate a brand new random AES-256 key?\n\nNote: You will need your previous key/passphrase to decrypt items uploaded previously.')) {
-        try {
-          const newKey = await generateRandomKey();
-          await saveEncryptionKey(newKey);
-          clearDecryptedBlobCache();
-          await updateE2EEUI();
-          showToast('🔑 New 256-bit Key Generated & Activated! 🛡️');
-          await refreshAppFeed();
-        } catch (err) {
-          showToast(`❌ Error: ${err.message}`);
-        }
-      }
     });
   }
 
@@ -1926,7 +1686,6 @@ function openSettingsModal() {
   const { url, key } = getSupabaseConfig();
   if (cfgUrl) cfgUrl.value = url;
   if (cfgKey) cfgKey.value = key;
-  updateE2EEUI();
   if (configModal) configModal.classList.remove('hidden');
 }
 

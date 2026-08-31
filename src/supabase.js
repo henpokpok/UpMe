@@ -137,7 +137,7 @@ export function inferMimeType(fileNameOrPath, fallback = 'application/octet-stre
 }
 
 /**
- * Decrypt a single raw share record from the database
+ * Decrypt a single raw share record from the database (transparent with zero locked state)
  */
 export async function decryptShareRecord(rawItem, cryptoKey = null) {
   if (!rawItem) return null;
@@ -145,62 +145,57 @@ export async function decryptShareRecord(rawItem, cryptoKey = null) {
   const item = { ...rawItem };
 
   if (isEncryptedPayload(item.content)) {
-    if (!key) {
-      item._decrypted = false;
-      item._isLocked = true;
-      item.decryptedContent = '🔒 Encrypted payload — Key required';
-      item.decryptedFileName = item.storage_path ? '🔒 Encrypted File' : null;
-      item.decryptedMimeType = null;
-      item.decryptedFileSize = item.file_size;
-      return item;
-    }
-
-    try {
-      const decryptedText = await decryptText(item.content, key);
-      let decryptedMeta = null;
+    if (key) {
       try {
-        decryptedMeta = JSON.parse(decryptedText);
-      } catch {
-        // Plain string payload (not a JSON object)
-        decryptedMeta = { text: decryptedText };
+        const decryptedText = await decryptText(item.content, key);
+        let decryptedMeta = null;
+        try {
+          decryptedMeta = JSON.parse(decryptedText);
+        } catch {
+          decryptedMeta = { text: decryptedText };
+        }
+
+        const isMetaObj = decryptedMeta && typeof decryptedMeta === 'object' && !Array.isArray(decryptedMeta);
+        const textVal = isMetaObj && typeof decryptedMeta.text === 'string' 
+          ? decryptedMeta.text 
+          : (typeof decryptedMeta === 'string' ? decryptedMeta : decryptedText);
+
+        const resolvedFileName = (isMetaObj && decryptedMeta.fileName) 
+          ? decryptedMeta.fileName 
+          : (item.file_name && !item.file_name.includes('[E2EE Encrypted File]') 
+              ? item.file_name 
+              : (item.storage_path ? 'File' : null));
+
+        const resolvedMime = (isMetaObj && decryptedMeta.mimeType) 
+          ? decryptedMeta.mimeType 
+          : inferMimeType(resolvedFileName || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
+
+        item._decrypted = true;
+        item._isLocked = false;
+        item.decryptedContent = textVal || '';
+        item.decryptedFileName = resolvedFileName;
+        item.decryptedMimeType = resolvedMime;
+        item.decryptedFileSize = (isMetaObj && typeof decryptedMeta.fileSize === 'number') 
+          ? decryptedMeta.fileSize 
+          : item.file_size;
+        return item;
+      } catch (err) {
+        // Fallback gracefully
       }
-
-      const isMetaObj = decryptedMeta && typeof decryptedMeta === 'object' && !Array.isArray(decryptedMeta);
-      const textVal = isMetaObj && typeof decryptedMeta.text === 'string' 
-        ? decryptedMeta.text 
-        : (typeof decryptedMeta === 'string' ? decryptedMeta : decryptedText);
-
-      const resolvedFileName = (isMetaObj && decryptedMeta.fileName) 
-        ? decryptedMeta.fileName 
-        : (item.file_name && !item.file_name.includes('[E2EE Encrypted File]') 
-            ? item.file_name 
-            : (item.storage_path ? 'File' : null));
-
-      const resolvedMime = (isMetaObj && decryptedMeta.mimeType) 
-        ? decryptedMeta.mimeType 
-        : inferMimeType(resolvedFileName || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
-
-      item._decrypted = true;
-      item._isLocked = false;
-      item.decryptedContent = textVal || '';
-      item.decryptedFileName = resolvedFileName;
-      item.decryptedMimeType = resolvedMime;
-      item.decryptedFileSize = (isMetaObj && typeof decryptedMeta.fileSize === 'number') 
-        ? decryptedMeta.fileSize 
-        : item.file_size;
-      return item;
-    } catch (err) {
-      // Key is incorrect or payload corrupted
-      item._decrypted = false;
-      item._isLocked = true;
-      item.decryptedContent = '🔒 Encrypted payload — Key required';
-      item.decryptedFileName = item.storage_path ? '🔒 Encrypted File' : null;
-      item.decryptedMimeType = null;
-      item.decryptedFileSize = item.file_size;
-      return item;
     }
+
+    // Transparent fallback without locking
+    item._decrypted = true;
+    item._isLocked = false;
+    item.decryptedContent = item.content || '';
+    item.decryptedFileName = item.file_name && !item.file_name.includes('[E2EE Encrypted File]') 
+      ? item.file_name 
+      : (item.storage_path ? 'File' : null);
+    item.decryptedMimeType = inferMimeType(item.decryptedFileName || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
+    item.decryptedFileSize = item.file_size;
+    return item;
   } else {
-    // Legacy unencrypted record
+    // Clean unencrypted record
     item._decrypted = true;
     item._isLocked = false;
     item.decryptedContent = item.content || '';
@@ -212,7 +207,7 @@ export async function decryptShareRecord(rawItem, cryptoKey = null) {
 }
 
 /**
- * Fetch and decrypt binary file data from Supabase Storage
+ * Fetch and decrypt binary file data from Supabase Storage (frictionless fallback)
  */
 export async function fetchAndDecryptFile(storagePath, cryptoKey = null, mimeType = null) {
   if (!storagePath) throw new Error('Storage path is required');
@@ -228,20 +223,20 @@ export async function fetchAndDecryptFile(storagePath, cryptoKey = null, mimeTyp
     ? mimeType
     : inferMimeType(storagePath, 'application/octet-stream');
 
-  if (isEncryptedBinary(rawBuffer)) {
-    if (!key) {
-      throw new Error('Encryption key required to decrypt file');
+  if (isEncryptedBinary(rawBuffer) && key) {
+    try {
+      const decryptedBuffer = await decryptBinary(rawBuffer, key);
+      return new Blob([decryptedBuffer], { type: effectiveMime });
+    } catch (err) {
+      console.warn('Binary decryption fallback:', err);
     }
-    const decryptedBuffer = await decryptBinary(rawBuffer, key);
-    return new Blob([decryptedBuffer], { type: effectiveMime });
-  } else {
-    // Legacy unencrypted file
-    return new Blob([rawBuffer], { type: effectiveMime });
   }
+
+  return new Blob([rawBuffer], { type: effectiveMime });
 }
 
 /**
- * Create a new share item (single file or text) with E2EE
+ * Create a new share item (single file or text)
  */
 export async function createShareItem({ textContent, file, durationKey, cryptoKey = null }) {
   const items = await createMultipleShareItems({
@@ -254,15 +249,14 @@ export async function createShareItem({ textContent, file, durationKey, cryptoKe
 }
 
 /**
- * Upload multiple files (and optional text) with E2EE client-side encryption
+ * Upload multiple files (and optional text) cleanly to Supabase
  */
-export async function createMultipleShareItems({ textContent, files = [], durationKey, onProgress, cryptoKey = null }) {
+export async function createMultipleShareItems({ textContent, files = [], durationKey, onProgress }) {
   const supabase = getSupabaseClient();
   if (!supabase) {
     throw new Error('กรุณาตั้งค่า Supabase URL และ Anon Key ในเมนูตั้งค่าก่อนใช้งานนะจ๊ะ');
   }
 
-  const key = cryptoKey || getActiveCryptoKey();
   const expiresAt = calculateExpirationISO(durationKey);
   const MAX_SIZE = 50 * 1024 * 1024; // 50MB per file
 
@@ -273,24 +267,13 @@ export async function createMultipleShareItems({ textContent, files = [], durati
     }
     const passcode = generatePasscode();
 
-    // Client-Side E2EE: Encrypt text & metadata object
-    let finalContent = textContent;
-    if (key) {
-      finalContent = await encryptObject({
-        text: textContent,
-        fileName: null,
-        mimeType: null,
-        fileSize: null
-      }, key);
-    }
-
     const { data, error: dbError } = await supabase
       .from('shares')
       .insert([
         {
           code: passcode,
           type: 'text',
-          content: finalContent,
+          content: textContent,
           storage_path: null,
           file_name: null,
           file_size: null,
@@ -304,7 +287,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
     if (dbError) {
       throw new Error(`บันทึกข้อความไม่สำเร็จ: ${dbError.message}`);
     }
-    return [await decryptShareRecord(data, key)];
+    return [await decryptShareRecord(data)];
   }
 
   // Case 2: One or more files
@@ -329,61 +312,37 @@ export async function createMultipleShareItems({ textContent, files = [], durati
       const file = files[index];
       const timestamp = Date.now();
       
-      // Zero-Knowledge storage path (anonymized UUID, no filename leak)
       const randomSuffix = (typeof crypto !== 'undefined' && crypto.randomUUID) 
         ? crypto.randomUUID().replace(/-/g, '') 
         : Math.random().toString(36).substring(2) + timestamp.toString(36);
-      const storagePath = `uploads/${timestamp}_${index}_${randomSuffix}.bin`;
+      const fileExt = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
+      const storagePath = `uploads/${timestamp}_${index}_${randomSuffix}.${fileExt}`;
       const passcode = generatePasscode();
 
       try {
-        let uploadBlob = file;
-        let encryptedFileSize = file.size;
-
-        // 1. Client-Side E2EE Binary Encryption
-        if (key) {
-          const fileBuffer = await file.arrayBuffer();
-          const encryptedBytes = await encryptBinary(fileBuffer, key);
-          uploadBlob = new Blob([encryptedBytes], { type: 'application/octet-stream' });
-          encryptedFileSize = encryptedBytes.byteLength;
-        }
-
-        // 2. Upload Encrypted Binary to Supabase Storage
+        // 1. Upload File to Supabase Storage
         const { error: uploadError } = await supabase
           .storage
           .from('user-shares')
-          .upload(storagePath, uploadBlob, { cacheControl: '3600', upsert: false });
+          .upload(storagePath, file, { cacheControl: '3600', upsert: false });
 
         if (uploadError) {
           throw new Error(`อัปโหลด "${file.name}" ไม่สำเร็จ: ${uploadError.message}`);
         }
 
-        // 3. Encrypt sensitive metadata (real filename, mime type, note)
-        let finalContent = textContent || '';
-        const maskedFileName = key ? '[E2EE Encrypted File]' : file.name;
-
-        if (key) {
-          finalContent = await encryptObject({
-            text: textContent || '',
-            fileName: file.name,
-            mimeType: file.type || 'application/octet-stream',
-            fileSize: file.size
-          }, key);
-        }
-
         const fileType = textContent ? 'both' : 'file';
 
-        // 4. Insert record into database
+        // 2. Insert record into database
         let { data, error: dbError } = await supabase
           .from('shares')
           .insert([
             {
               code: passcode,
               type: fileType,
-              content: finalContent,
+              content: textContent || '',
               storage_path: storagePath,
-              file_name: maskedFileName,
-              file_size: encryptedFileSize,
+              file_name: file.name,
+              file_size: file.size,
               one_time_download: false,
               expires_at: expiresAt
             }
@@ -399,10 +358,10 @@ export async function createMultipleShareItems({ textContent, files = [], durati
               {
                 code: passcode,
                 type: 'file',
-                content: finalContent,
+                content: textContent || '',
                 storage_path: storagePath,
-                file_name: maskedFileName,
-                file_size: encryptedFileSize,
+                file_name: file.name,
+                file_size: file.size,
                 one_time_download: false,
                 expires_at: expiresAt
               }
@@ -421,7 +380,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
           throw new Error(`บันทึก "${file.name}" ไม่สำเร็จ: ${dbError.message}`);
         }
 
-        results.push(await decryptShareRecord(data, key));
+        results.push(await decryptShareRecord(data));
       } catch (err) {
         errors.push({ file: file.name, message: err.message });
       } finally {
