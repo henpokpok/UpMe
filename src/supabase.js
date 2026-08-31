@@ -1,14 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import {
-  getActiveCryptoKey,
-  encryptObject,
-  encryptBinary,
-  decryptObject,
-  decryptText,
-  decryptBinary,
-  isEncryptedPayload,
-  isEncryptedBinary
-} from './crypto.js';
 
 const STORAGE_URL_KEY = 'upme_supabase_url';
 const STORAGE_ANON_KEY = 'upme_supabase_anon_key';
@@ -108,142 +98,13 @@ export async function savePushSubscription(subscription) {
 }
 
 /**
- * Infer MIME type from filename or path extension
- */
-export function inferMimeType(fileNameOrPath, fallback = 'application/octet-stream') {
-  if (!fileNameOrPath || typeof fileNameOrPath !== 'string') return fallback;
-  const clean = fileNameOrPath.toLowerCase().split('?')[0].split('#')[0];
-  if (clean.endsWith('.png')) return 'image/png';
-  if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'image/jpeg';
-  if (clean.endsWith('.gif')) return 'image/gif';
-  if (clean.endsWith('.webp')) return 'image/webp';
-  if (clean.endsWith('.svg')) return 'image/svg+xml';
-  if (clean.endsWith('.heic')) return 'image/heic';
-  if (clean.endsWith('.heif')) return 'image/heif';
-  if (clean.endsWith('.pdf')) return 'application/pdf';
-  if (clean.endsWith('.txt')) return 'text/plain';
-  if (clean.endsWith('.json')) return 'application/json';
-  if (clean.endsWith('.csv')) return 'text/csv';
-  if (clean.endsWith('.mp4')) return 'video/mp4';
-  if (clean.endsWith('.mov')) return 'video/quicktime';
-  if (clean.endsWith('.webm')) return 'video/webm';
-  if (clean.endsWith('.mp3')) return 'audio/mpeg';
-  if (clean.endsWith('.wav')) return 'audio/wav';
-  if (clean.endsWith('.zip')) return 'application/zip';
-  if (clean.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  if (clean.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  if (clean.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-  return fallback;
-}
-
-/**
- * Decrypt a single raw share record from the database (transparent with zero locked state)
- */
-export async function decryptShareRecord(rawItem, cryptoKey = null) {
-  if (!rawItem) return null;
-  const key = cryptoKey || getActiveCryptoKey();
-  const item = { ...rawItem };
-
-  if (isEncryptedPayload(item.content)) {
-    if (key) {
-      try {
-        const decryptedText = await decryptText(item.content, key);
-        let decryptedMeta = null;
-        try {
-          decryptedMeta = JSON.parse(decryptedText);
-        } catch {
-          decryptedMeta = { text: decryptedText };
-        }
-
-        const isMetaObj = decryptedMeta && typeof decryptedMeta === 'object' && !Array.isArray(decryptedMeta);
-        const textVal = isMetaObj && typeof decryptedMeta.text === 'string' 
-          ? decryptedMeta.text 
-          : (typeof decryptedMeta === 'string' ? decryptedMeta : decryptedText);
-
-        const resolvedFileName = (isMetaObj && decryptedMeta.fileName) 
-          ? decryptedMeta.fileName 
-          : (item.file_name && !item.file_name.includes('[E2EE Encrypted File]') 
-              ? item.file_name 
-              : (item.storage_path ? 'File' : null));
-
-        const resolvedMime = (isMetaObj && decryptedMeta.mimeType) 
-          ? decryptedMeta.mimeType 
-          : inferMimeType(resolvedFileName || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
-
-        item._decrypted = true;
-        item._isLocked = false;
-        item.decryptedContent = textVal || '';
-        item.decryptedFileName = resolvedFileName;
-        item.decryptedMimeType = resolvedMime;
-        item.decryptedFileSize = (isMetaObj && typeof decryptedMeta.fileSize === 'number') 
-          ? decryptedMeta.fileSize 
-          : item.file_size;
-        return item;
-      } catch (err) {
-        // Fallback gracefully
-      }
-    }
-
-    // Transparent fallback without locking
-    item._decrypted = true;
-    item._isLocked = false;
-    item.decryptedContent = item.content || '';
-    item.decryptedFileName = item.file_name && !item.file_name.includes('[E2EE Encrypted File]') 
-      ? item.file_name 
-      : (item.storage_path ? 'File' : null);
-    item.decryptedMimeType = inferMimeType(item.decryptedFileName || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
-    item.decryptedFileSize = item.file_size;
-    return item;
-  } else {
-    // Clean unencrypted record
-    item._decrypted = true;
-    item._isLocked = false;
-    item.decryptedContent = item.content || '';
-    item.decryptedFileName = item.file_name;
-    item.decryptedMimeType = inferMimeType(item.file_name || item.storage_path, item.storage_path ? 'application/octet-stream' : null);
-    item.decryptedFileSize = item.file_size;
-    return item;
-  }
-}
-
-/**
- * Fetch and decrypt binary file data from Supabase Storage (frictionless fallback)
- */
-export async function fetchAndDecryptFile(storagePath, cryptoKey = null, mimeType = null) {
-  if (!storagePath) throw new Error('Storage path is required');
-  const fileUrl = getFilePublicUrl(storagePath);
-  if (!fileUrl) throw new Error(`Could not get public URL for ${storagePath}`);
-
-  const key = cryptoKey || getActiveCryptoKey();
-  const res = await fetch(fileUrl);
-  if (!res.ok) throw new Error(`Failed to fetch file from storage: HTTP ${res.status}`);
-
-  const rawBuffer = await res.arrayBuffer();
-  const effectiveMime = (mimeType && mimeType !== 'application/octet-stream')
-    ? mimeType
-    : inferMimeType(storagePath, 'application/octet-stream');
-
-  if (isEncryptedBinary(rawBuffer) && key) {
-    try {
-      const decryptedBuffer = await decryptBinary(rawBuffer, key);
-      return new Blob([decryptedBuffer], { type: effectiveMime });
-    } catch (err) {
-      console.warn('Binary decryption fallback:', err);
-    }
-  }
-
-  return new Blob([rawBuffer], { type: effectiveMime });
-}
-
-/**
  * Create a new share item (single file or text)
  */
-export async function createShareItem({ textContent, file, durationKey, cryptoKey = null }) {
+export async function createShareItem({ textContent, file, durationKey }) {
   const items = await createMultipleShareItems({
     textContent,
     files: file ? [file] : [],
-    durationKey,
-    cryptoKey
+    durationKey
   });
   return items[0];
 }
@@ -287,7 +148,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
     if (dbError) {
       throw new Error(`บันทึกข้อความไม่สำเร็จ: ${dbError.message}`);
     }
-    return [await decryptShareRecord(data)];
+    return [data];
   }
 
   // Case 2: One or more files
@@ -311,12 +172,8 @@ export async function createMultipleShareItems({ textContent, files = [], durati
       const index = currentIndex++;
       const file = files[index];
       const timestamp = Date.now();
-      
-      const randomSuffix = (typeof crypto !== 'undefined' && crypto.randomUUID) 
-        ? crypto.randomUUID().replace(/-/g, '') 
-        : Math.random().toString(36).substring(2) + timestamp.toString(36);
-      const fileExt = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
-      const storagePath = `uploads/${timestamp}_${index}_${randomSuffix}.${fileExt}`;
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `uploads/${timestamp}_${index}_${sanitizedFileName}`;
       const passcode = generatePasscode();
 
       try {
@@ -330,7 +187,14 @@ export async function createMultipleShareItems({ textContent, files = [], durati
           throw new Error(`อัปโหลด "${file.name}" ไม่สำเร็จ: ${uploadError.message}`);
         }
 
+        const { data: publicUrlData } = supabase
+          .storage
+          .from('user-shares')
+          .getPublicUrl(storagePath);
+
+        const publicUrl = publicUrlData ? publicUrlData.publicUrl : '';
         const fileType = textContent ? 'both' : 'file';
+        const finalContent = textContent ? textContent : (publicUrl || '');
 
         // 2. Insert record into database
         let { data, error: dbError } = await supabase
@@ -339,7 +203,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
             {
               code: passcode,
               type: fileType,
-              content: textContent || '',
+              content: finalContent,
               storage_path: storagePath,
               file_name: file.name,
               file_size: file.size,
@@ -358,7 +222,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
               {
                 code: passcode,
                 type: 'file',
-                content: textContent || '',
+                content: finalContent,
                 storage_path: storagePath,
                 file_name: file.name,
                 file_size: file.size,
@@ -380,7 +244,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
           throw new Error(`บันทึก "${file.name}" ไม่สำเร็จ: ${dbError.message}`);
         }
 
-        results.push(await decryptShareRecord(data));
+        results.push(data);
       } catch (err) {
         errors.push({ file: file.name, message: err.message });
       } finally {
@@ -408,9 +272,9 @@ export async function createMultipleShareItems({ textContent, files = [], durati
 }
 
 /**
- * Fetch all active non-expired shares and decrypt them on the fly
+ * Fetch all active non-expired shares
  */
-export async function getActiveSharesList(cryptoKey = null) {
+export async function getActiveSharesList() {
   try {
     const supabase = getSupabaseClient();
     if (!supabase) return [];
@@ -426,11 +290,7 @@ export async function getActiveSharesList(cryptoKey = null) {
       return [];
     }
 
-    if (!data || data.length === 0) return [];
-
-    const key = cryptoKey || getActiveCryptoKey();
-    const decryptedItems = await Promise.all(data.map(item => decryptShareRecord(item, key)));
-    return decryptedItems;
+    return data || [];
   } catch (err) {
     console.error('Exception in getActiveSharesList:', err);
     return [];
@@ -442,7 +302,7 @@ let activeRealtimeChannel = null;
 /**
  * Subscribe safely to Realtime WebSocket INSERT broadcasts on 'shares' table
  */
-export function subscribeToRealtimeUploads(onNewUpload, cryptoKey = null) {
+export function subscribeToRealtimeUploads(onNewUpload) {
   try {
     const supabase = getSupabaseClient();
     if (!supabase) return null;
@@ -461,19 +321,13 @@ export function subscribeToRealtimeUploads(onNewUpload, cryptoKey = null) {
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'shares' },
-        async (payload) => {
+        (payload) => {
           if (payload && payload.new) {
-            const key = cryptoKey || getActiveCryptoKey();
-            const decryptedRecord = await decryptShareRecord(payload.new, key);
-            onNewUpload(decryptedRecord);
+            onNewUpload(payload.new);
           }
         }
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          // Connected safely
-        }
-      });
+      .subscribe();
 
     return activeRealtimeChannel;
   } catch (err) {
@@ -554,12 +408,12 @@ export async function batchDeleteShares(items) {
 
 /**
  * Calculate total active storage bytes used out of 1GB free tier limit
- * Supports passing pre-fetched shares to avoid duplicate network queries and decryptions
+ * Supports passing pre-fetched shares to avoid duplicate network queries
  */
 export async function getStorageUsageInfo(providedShares = null) {
   try {
     if (Array.isArray(providedShares)) {
-      const totalBytes = providedShares.reduce((acc, curr) => acc + (curr.file_size || curr.decryptedFileSize || 0), 0);
+      const totalBytes = providedShares.reduce((acc, curr) => acc + (curr.file_size || 0), 0);
       const activeCount = providedShares.length;
       return { totalBytes, activeCount };
     }

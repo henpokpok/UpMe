@@ -10,26 +10,8 @@ import {
   getStorageUsageInfo,
   subscribeToRealtimeUploads,
   savePushSubscription,
-  getFilePublicUrl,
-  fetchAndDecryptFile,
-  decryptShareRecord
+  getFilePublicUrl
 } from './supabase.js';
-import {
-  initializeEncryptionKey,
-  getActiveCryptoKey,
-  setActiveCryptoKey,
-  saveEncryptionKey,
-  setMasterPassphrase,
-  setRawKeyBase64,
-  generateRandomKey,
-  exportKeyToBase64,
-  importKeyFromBase64,
-  deriveKeyFromPassphrase,
-  getKeyFingerprint,
-  getPairingUrl,
-  applyKeyOrPassphrase,
-  STORAGE_E2EE_PASSPHRASE
-} from './crypto.js';
 
 // Local Storage Key for Accessed Items
 const ACCESSED_ITEMS_KEY = 'upme_accessed_ids';
@@ -47,47 +29,6 @@ function markItemAsAccessed(id) {
   if (!list.includes(id)) {
     list.push(id);
     localStorage.setItem(ACCESSED_ITEMS_KEY, JSON.stringify(list));
-  }
-}
-
-// In-Memory Decrypted Object URLs LRU Cache (storagePath -> blobUrl)
-const MAX_BLOB_CACHE_ITEMS = 20;
-const decryptedBlobUrlCache = new Map();
-
-function cacheDecryptedBlobUrl(storagePath, url) {
-  if (!storagePath || !url) return;
-  if (decryptedBlobUrlCache.has(storagePath)) {
-    const oldUrl = decryptedBlobUrlCache.get(storagePath);
-    if (oldUrl !== url) {
-      try { URL.revokeObjectURL(oldUrl); } catch {}
-    }
-    decryptedBlobUrlCache.delete(storagePath);
-  } else if (decryptedBlobUrlCache.size >= MAX_BLOB_CACHE_ITEMS) {
-    const oldestKey = decryptedBlobUrlCache.keys().next().value;
-    if (oldestKey) {
-      const oldestUrl = decryptedBlobUrlCache.get(oldestKey);
-      try { URL.revokeObjectURL(oldestUrl); } catch {}
-      decryptedBlobUrlCache.delete(oldestKey);
-    }
-  }
-  decryptedBlobUrlCache.set(storagePath, url);
-}
-
-function clearDecryptedBlobCache() {
-  decryptedBlobUrlCache.forEach((url) => {
-    try {
-      URL.revokeObjectURL(url);
-    } catch {}
-  });
-  decryptedBlobUrlCache.clear();
-}
-
-function revokeBlobUrlForPath(storagePath) {
-  if (storagePath && decryptedBlobUrlCache.has(storagePath)) {
-    try {
-      URL.revokeObjectURL(decryptedBlobUrlCache.get(storagePath));
-    } catch {}
-    decryptedBlobUrlCache.delete(storagePath);
   }
 }
 
@@ -488,7 +429,7 @@ async function openHistoryPopover() {
 
     const uploadTimeStr = formatShortTime(item.created_at);
     const isAccessed = accessedList.includes(item.id);
-    const titleStr = item._isLocked ? '🔒 Encrypted item' : (item.decryptedFileName || item.decryptedContent || 'Item');
+    const titleStr = item.file_name || item.content || 'Item';
 
     rowEl.innerHTML = `
       <div class="history-item-info">
@@ -511,7 +452,6 @@ async function openHistoryPopover() {
       e.stopPropagation();
 
       if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-        revokeBlobUrlForPath(item.storage_path);
         const res = await deleteShareRecordAndStorage(item.id, item.storage_path);
         if (res.success) {
           showToast('🗑️ ลบรายการเรียบร้อยแล้ว');
@@ -542,12 +482,10 @@ function triggerSystemNotification(newRecord) {
   const title = 'UpMee 🐰';
   let bodyText = '';
 
-  if (newRecord._isLocked) {
-    bodyText = '🔒 ได้รับรายการใหม่ (เข้ารหัส E2EE)';
-  } else if (isFile) {
-    bodyText = `ไฟล์ใหม่: ${newRecord.decryptedFileName || 'ไฟล์แนบ'}`;
+  if (isFile) {
+    bodyText = `ไฟล์ใหม่: ${newRecord.file_name || 'ไฟล์แนบ'}`;
   } else {
-    bodyText = newRecord.decryptedContent ? newRecord.decryptedContent.substring(0, 40) : 'ข้อความใหม่';
+    bodyText = newRecord.content ? newRecord.content.substring(0, 40) : 'ข้อความใหม่';
   }
 
   const itemTag = 'upmee-share-' + (newRecord.id || newRecord.created_at || 'item');
@@ -909,9 +847,9 @@ function updateBatchUI() {
   });
 }
 
-// Download All active files as single ZIP (with transparent client-side decryption)
+// Download All active files as single ZIP
 async function downloadAllAsZip() {
-  const fileItems = currentSharesList.filter(item => item.storage_path || item.decryptedContent);
+  const fileItems = currentSharesList.filter(item => item.storage_path || item.content);
   if (!fileItems || fileItems.length === 0) {
     showToast('⚠️ ไม่มีไฟล์สำหรับดาวน์โหลด');
     return;
@@ -964,10 +902,10 @@ async function batchDeleteSelected() {
   }
 }
 
-// Robust JSZip file archiver with on-the-fly decryption and duplicate name handling
+// Robust JSZip file archiver with direct fetch and original file names
 async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.zip') {
   try {
-    showToast(`⏳ กำลังถอดรหัสและบีบอัด ${itemsToDownload.length} รายการ...`);
+    showToast(`⏳ กำลังบีบอัด ${itemsToDownload.length} รายการเป็นไฟล์ ZIP...`);
     const zip = new JSZip();
     const usedNames = new Map();
 
@@ -976,17 +914,14 @@ async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.
       const chunk = itemsToDownload.slice(i, i + BATCH_SIZE);
       await Promise.all(chunk.map(async (item, chunkIdx) => {
         const index = i + chunkIdx;
-        if (item._isLocked) {
-          console.warn(`Item ${item.id} is locked, skipping from ZIP`);
-          return;
-        }
-
+        const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
         const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
 
-        if (isFile && item.storage_path) {
+        if (isFile && fileUrl) {
           try {
-            const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
-            let fileNameStr = item.decryptedFileName || `file_${index + 1}`;
+            const res = await fetch(fileUrl);
+            const blob = await res.blob();
+            let fileNameStr = item.file_name || `file_${index + 1}`;
 
             if (usedNames.has(fileNameStr)) {
               const count = usedNames.get(fileNameStr) + 1;
@@ -1004,11 +939,11 @@ async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.
             zip.file(fileNameStr, blob);
             markItemAsAccessed(item.id);
           } catch (fetchErr) {
-            console.warn(`Failed to fetch/decrypt file for ZIP (${item.decryptedFileName}):`, fetchErr);
+            console.warn(`Failed to fetch file for ZIP (${item.file_name}):`, fetchErr);
           }
-        } else if (item.decryptedContent) {
+        } else if (item.content) {
           let textName = `note_${index + 1}.txt`;
-          zip.file(textName, item.decryptedContent);
+          zip.file(textName, item.content);
           markItemAsAccessed(item.id);
         }
       }));
@@ -1038,20 +973,16 @@ async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.
   }
 }
 
-// Download multiple files concurrently via client-side decrypted blob triggers
+// Download multiple files concurrently
 async function downloadFilesConcurrently(itemsToDownload) {
-  showToast(`⚡ กำลังถอดรหัสและดาวน์โหลด ${itemsToDownload.length} ไฟล์พร้อมกัน...`);
+  showToast(`⚡ กำลังดาวน์โหลด ${itemsToDownload.length} ไฟล์พร้อมกัน...`);
 
   for (let i = 0; i < itemsToDownload.length; i++) {
     const item = itemsToDownload[i];
-    if (item._isLocked) {
-      showToast(`🔒 "${item.decryptedFileName || 'File'}" is locked (key required)`);
-      continue;
-    }
-
-    if (item.storage_path) {
+    const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
+    if (fileUrl) {
       markItemAsAccessed(item.id);
-      await downloadDecryptedFileDirectly(item);
+      await downloadFileDirectly(fileUrl, item.file_name || 'download');
       if (i < itemsToDownload.length - 1) {
         await new Promise(r => setTimeout(r, 150));
       }
@@ -1059,88 +990,31 @@ async function downloadFilesConcurrently(itemsToDownload) {
   }
 }
 
-// Client-side in-memory decrypted file download
-async function downloadDecryptedFileDirectly(item) {
-  if (!item) return;
-
-  if (item._isLocked) {
-    openUnlockModal();
-    showToast('🔒 Key required to decrypt and download this file');
-    return;
-  }
-
-  if (!item.storage_path) {
-    if (item.decryptedContent) {
-      await copyToClipboard(item.decryptedContent, '📋 Copied text to clipboard!');
-    }
-    return;
-  }
-
+// Direct file download preserving original file names
+async function downloadFileDirectly(url, fileName) {
   try {
-    showToast('⏳ กำลังถอดรหัสและดาวน์โหลดไฟล์...');
-    const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.style.display = 'none';
     a.href = blobUrl;
-    a.download = item.decryptedFileName || 'download';
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
 
     setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-    showToast('💾 ดาวน์โหลดไฟล์สำเร็จ! 🛡️');
+    showToast('💾 ดาวน์โหลดไฟล์สำเร็จ!');
   } catch (err) {
-    console.error('Download error:', err);
-    showToast(`❌ ดาวน์โหลดไม่สำเร็จ: ${err.message}`);
-  }
-}
-
-// --- IntersectionObserver for Lazy Decryption of Image Thumbnails ---
-let thumbnailObserverInstance = null;
-
-function getThumbnailObserver() {
-  if (typeof IntersectionObserver === 'undefined') return null;
-  if (!thumbnailObserverInstance) {
-    thumbnailObserverInstance = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          const imgEl = entry.target;
-          thumbnailObserverInstance.unobserve(imgEl);
-          const shareId = imgEl.getAttribute('data-share-id');
-          if (shareId) {
-            const item = currentSharesList.find(i => i.id === shareId);
-            if (item) {
-              loadDecryptedImageThumbnail(item, imgEl);
-            }
-          }
-        }
-      });
-    }, { rootMargin: '120px 0px' });
-  }
-  return thumbnailObserverInstance;
-}
-
-// Helper to asynchronously fetch and decrypt image thumbnail in-memory (with LRU caching)
-async function loadDecryptedImageThumbnail(item, imgElement) {
-  if (!item || !item.storage_path || !imgElement) return;
-
-  if (decryptedBlobUrlCache.has(item.storage_path)) {
-    imgElement.src = decryptedBlobUrlCache.get(item.storage_path);
-    return;
-  }
-
-  try {
-    const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
-    const objectUrl = URL.createObjectURL(blob);
-    cacheDecryptedBlobUrl(item.storage_path, objectUrl);
-    imgElement.src = objectUrl;
-  } catch (err) {
-    console.warn(`Failed to decrypt image thumbnail (${item.decryptedFileName}):`, err);
-    if (imgElement.parentElement) {
-      imgElement.parentElement.innerHTML = `<span class="cloud-thumb-icon">🖼️</span>`;
-    }
+    console.error('Direct download fallback:', err);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.target = '_blank';
+    a.click();
   }
 }
 
@@ -1169,11 +1043,11 @@ async function refreshAppFeed() {
   isRefreshingFeed = true;
 
   try {
-    // 1. Fetch & decrypt active shares list once
+    // 1. Fetch active shares list once
     const sharesList = await getActiveSharesList();
     currentSharesList = sharesList || [];
 
-    // 2. Storage Bar % Calculation directly from pre-fetched list (no duplicate DB query/decryption)
+    // 2. Storage Bar % Calculation directly from pre-fetched list
     const { totalBytes } = await getStorageUsageInfo(currentSharesList);
     const TOTAL_CAPACITY = 1000 * 1024 * 1024; // 1,000 MB (1 GB)
     const percentageNum = (totalBytes / TOTAL_CAPACITY) * 100;
@@ -1246,9 +1120,6 @@ async function refreshAppFeed() {
 // --- Render Sleek Horizontal Rectangle Items (Instant 1-Click Access) ---
 function renderCloudItemBubbles(sharesList) {
   if (!liveFeedContainer) return;
-  if (thumbnailObserverInstance) {
-    thumbnailObserverInstance.disconnect();
-  }
   liveFeedContainer.innerHTML = '';
 
   sharesList.forEach(item => {
@@ -1256,9 +1127,10 @@ function renderCloudItemBubbles(sharesList) {
     cardEl.className = `cloud-item-row-card ${selectedShareIds.has(item.id) ? 'selected' : ''}`;
     cardEl.setAttribute('data-id', item.id);
 
-    const isImage = item.decryptedFileName && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.decryptedFileName);
+    const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
+    const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
     const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
-    const isUrl = item.decryptedContent && /^https?:\/\/[^\s]+$/i.test(item.decryptedContent.trim());
+    const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
     // 0. Select Checkbox
     let checkboxHtml = '';
@@ -1272,10 +1144,10 @@ function renderCloudItemBubbles(sharesList) {
 
     // 1. Left Square Thumbnail
     let squareThumbHtml = '';
-    if (isImage && item.storage_path) {
+    if (isImage && fileUrl) {
       squareThumbHtml = `
         <div class="cloud-item-square-thumb" title="Click for large preview">
-          <img src="" alt="preview" class="cloud-thumb-img decrypted-thumb-img" data-storage="${escapeHtml(item.storage_path)}" data-share-id="${escapeHtml(item.id)}" />
+          <img src="${fileUrl}" alt="preview" class="cloud-thumb-img" loading="lazy" />
         </div>
       `;
     } else {
@@ -1292,12 +1164,12 @@ function renderCloudItemBubbles(sharesList) {
 
     // 2. Right Info & Timestamps
     let titleStr = '';
-    if (item.decryptedFileName) {
-      titleStr = item.type === 'both' && item.decryptedContent
-        ? `${item.decryptedFileName} — "${item.decryptedContent.substring(0, 24)}"`
-        : item.decryptedFileName;
+    if (item.file_name) {
+      titleStr = item.type === 'both' && item.content
+        ? `${item.file_name} — "${item.content.substring(0, 24)}"`
+        : item.file_name;
     } else {
-      titleStr = item.decryptedContent || 'Item';
+      titleStr = item.content || 'Item';
     }
 
     const shortUploadTime = formatShortTime(item.created_at);
@@ -1359,19 +1231,6 @@ function renderCloudItemBubbles(sharesList) {
       </div>
     `;
 
-    // Asynchronously populate decrypted image thumbnail (lazy loaded via IntersectionObserver)
-    if (isImage && item.storage_path) {
-      const imgEl = cardEl.querySelector('.decrypted-thumb-img');
-      if (imgEl) {
-        const observer = getThumbnailObserver();
-        if (observer) {
-          observer.observe(imgEl);
-        } else {
-          loadDecryptedImageThumbnail(item, imgEl);
-        }
-      }
-    }
-
     // Multi-Select Card Click Handler
     if (isSelectMode) {
       cardEl.addEventListener('click', (e) => {
@@ -1406,9 +1265,9 @@ function renderCloudItemBubbles(sharesList) {
     if (quickCopyBtn) {
       quickCopyBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (item.decryptedContent) {
+        if (item.content) {
           markItemAsAccessed(item.id);
-          await copyToClipboard(item.decryptedContent, '📋 Copied!');
+          await copyToClipboard(item.content, '📋 Copied!');
         }
       });
     }
@@ -1419,8 +1278,10 @@ function renderCloudItemBubbles(sharesList) {
       quickSaveBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        markItemAsAccessed(item.id);
-        downloadDecryptedFileDirectly(item);
+        if (fileUrl) {
+          markItemAsAccessed(item.id);
+          downloadFileDirectly(fileUrl, item.file_name || 'download');
+        }
       });
     }
 
@@ -1430,7 +1291,6 @@ function renderCloudItemBubbles(sharesList) {
       quickDeleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-          revokeBlobUrlForPath(item.storage_path);
           const res = await deleteShareRecordAndStorage(item.id, item.storage_path);
           if (res.success) {
             showToast('🗑️ Deleted!');
@@ -1455,30 +1315,32 @@ function initItemModal() {
   });
 
   modalCopyBtn.addEventListener('click', async () => {
-    if (currentActiveItem && currentActiveItem.decryptedContent) {
+    if (currentActiveItem && currentActiveItem.content) {
       markItemAsAccessed(currentActiveItem.id);
-      await copyToClipboard(currentActiveItem.decryptedContent, '📋 Copied!');
+      await copyToClipboard(currentActiveItem.content, '📋 Copied!');
     }
   });
 
   modalDownloadBtn.addEventListener('click', (e) => {
     e.preventDefault();
     if (currentActiveItem) {
-      markItemAsAccessed(currentActiveItem.id);
-      downloadDecryptedFileDirectly(currentActiveItem);
+      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.content;
+      if (fileUrl) {
+        markItemAsAccessed(currentActiveItem.id);
+        downloadFileDirectly(fileUrl, currentActiveItem.file_name || 'download');
+      }
     }
   });
 
   modalShareBtn.addEventListener('click', () => {
     if (currentActiveItem) {
-      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.decryptedContent;
+      const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.content;
       openQrModal(fileUrl || window.location.href);
     }
   });
 
   modalDeleteBtn.addEventListener('click', async () => {
     if (currentActiveItem && confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
-      revokeBlobUrlForPath(currentActiveItem.storage_path);
       const res = await deleteShareRecordAndStorage(currentActiveItem.id, currentActiveItem.storage_path);
       if (res.success) {
         showToast('🗑️ Deleted!');
@@ -1491,12 +1353,13 @@ function initItemModal() {
   });
 }
 
-async function openItemPreviewModal(item) {
+function openItemPreviewModal(item) {
   currentActiveItem = item;
+  const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
 
   modalItemBadge.textContent = item.type === 'both' ? 'Message + File' : item.type === 'file' ? 'File' : 'Message / Link';
   if (modalFileName) {
-    modalFileName.textContent = item.decryptedFileName || (item.decryptedContent ? item.decryptedContent.substring(0, 30) : 'Item');
+    modalFileName.textContent = item.file_name || (item.content ? item.content.substring(0, 30) : 'Item');
   }
 
   modalPreviewArea.innerHTML = '';
@@ -1505,49 +1368,36 @@ async function openItemPreviewModal(item) {
   modalOpenLinkBtn.classList.add('hidden');
   modalDownloadBtn.classList.add('hidden');
 
-  const isImage = item.decryptedFileName && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.decryptedFileName);
+  const isImage = item.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(item.file_name);
   const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
-  const isUrl = item.decryptedContent && /^https?:\/\/[^\s]+$/i.test(item.decryptedContent.trim());
+  const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
   // Image Preview inside Modal
-  if (isImage && item.storage_path) {
-    modalPreviewArea.innerHTML = `<div class="loading-spinner-box"><p>Decrypting image preview...</p></div>`;
-    itemModal.classList.remove('hidden');
-
-    try {
-      let objectUrl = decryptedBlobUrlCache.get(item.storage_path);
-      if (!objectUrl) {
-        const blob = await fetchAndDecryptFile(item.storage_path, getActiveCryptoKey(), item.decryptedMimeType);
-        objectUrl = URL.createObjectURL(blob);
-        decryptedBlobUrlCache.set(item.storage_path, objectUrl);
-      }
-      modalPreviewArea.innerHTML = `<img src="${objectUrl}" alt="preview" class="modal-img-preview" />`;
-    } catch (err) {
-      modalPreviewArea.innerHTML = `<p style="color: var(--danger-red);">⚠️ Failed to decrypt image preview: ${err.message}</p>`;
-    }
+  if (isImage && fileUrl) {
+    modalPreviewArea.innerHTML = `<img src="${fileUrl}" alt="preview" class="modal-img-preview" />`;
   } else if (isFile) {
-    const fileNameStr = item.decryptedFileName || 'File';
-    const fileSizeStr = item.decryptedFileSize ? formatBytes(item.decryptedFileSize) : (item.file_size ? formatBytes(item.file_size) : '');
+    const fileNameStr = item.file_name || 'File';
+    const fileSizeStr = item.file_size ? formatBytes(item.file_size) : '';
     modalPreviewArea.innerHTML = `
       <div style="font-size: 3rem; margin-bottom: 4px;">📁</div>
       <p style="font-size: 0.95rem; font-weight: 700;">${escapeHtml(fileNameStr)}</p>
-      ${fileSizeStr ? `<p style="font-size: 0.78rem; color: #6b7280;">${fileSizeStr} (E2EE 🛡️)</p>` : ''}
+      ${fileSizeStr ? `<p style="font-size: 0.78rem; color: #6b7280;">${fileSizeStr}</p>` : ''}
     `;
   }
 
   // Text Content Display
-  if (item.decryptedContent && (item.type === 'text' || item.type === 'both')) {
-    modalTextContent.textContent = item.decryptedContent;
+  if (item.content && (item.type === 'text' || item.type === 'both')) {
+    modalTextContent.textContent = item.content;
     modalTextContent.classList.remove('hidden');
     modalCopyBtn.classList.remove('hidden');
 
     if (isUrl) {
-      modalOpenLinkBtn.href = item.decryptedContent;
+      modalOpenLinkBtn.href = item.content;
       modalOpenLinkBtn.classList.remove('hidden');
     }
   }
 
-  if (isFile) {
+  if (isFile && fileUrl) {
     modalDownloadBtn.classList.remove('hidden');
   }
 
@@ -1578,14 +1428,11 @@ function initQrModal() {
 
   if (qrNativeShareBtn) {
     qrNativeShareBtn.addEventListener('click', async () => {
-      const urlToShare = currentQrUrl || (currentActiveItem && currentActiveItem.decryptedContent) || window.location.href;
-      const isPairingLink = urlToShare.includes('#key=') || urlToShare.includes('?key=');
-      const shareTitle = isPairingLink ? 'UpMee E2EE Pairing Key' : 'UpMee 🐰';
-      const shareText = isPairingLink 
-        ? 'Sync your UpMe encryption key on another device' 
-        : (currentActiveItem && currentActiveItem.decryptedFileName) 
-          ? `UpMee File: ${currentActiveItem.decryptedFileName}`
-          : 'UpMee Share';
+      const urlToShare = currentQrUrl || (currentActiveItem && currentActiveItem.content) || window.location.href;
+      const shareTitle = 'UpMee 🐰';
+      const shareText = (currentActiveItem && currentActiveItem.file_name) 
+        ? `UpMee File: ${currentActiveItem.file_name}`
+        : 'UpMee Share';
 
       if (navigator.share) {
         try {
