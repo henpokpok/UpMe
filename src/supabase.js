@@ -105,7 +105,7 @@ export async function getVaultChallenge() {
     const { data, error } = await supabase
       .from('shares')
       .select('content')
-      .eq('code', 'VAULT_GATE_V1')
+      .eq('code', 'VAULT1')
       .maybeSingle();
     if (error || !data) return null;
     return data.content;
@@ -131,14 +131,14 @@ export async function setupVaultChallenge(cryptoKey) {
       const { error } = await supabase
         .from('shares')
         .update({ content: encryptedSecret })
-        .eq('code', 'VAULT_GATE_V1');
+        .eq('code', 'VAULT1');
       return !error;
     } else {
       const { error } = await supabase
         .from('shares')
         .insert([
           {
-            code: 'VAULT_GATE_V1',
+            code: 'VAULT1',
             type: 'text',
             content: encryptedSecret,
             storage_path: null,
@@ -457,7 +457,7 @@ export async function getActiveSharesList() {
       .from('shares')
       .select('*')
       .gt('expires_at', new Date().toISOString())
-      .neq('code', 'VAULT_GATE_V1')
+      .neq('code', 'VAULT1')
       .order('created_at', { ascending: false });
 
     if (error) {
