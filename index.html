@@ -35,18 +35,14 @@
       <div class="logo-area">
         <img src="/bunny_mascot.png" alt="UpMee Bunny Mascot" class="bunny-logo-img" />
         <span class="logo-text">UpMee</span>
-        <div id="header-vault-badge" class="e2ee-header-badge locked" title="Device Authorization Status">
-          <span class="status-dot"></span>
-          <span id="vault-badge-text">Vault Locked</span>
-        </div>
       </div>
 
       <div class="header-actions">
-        <!-- History / Chat Bubble Anchor Button -->
+        <!-- History / Notifications Button -->
         <button id="history-btn" class="icon-btn icon-only" title="History & Notifications">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <polyline points="12 6 12 16 14"/>
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
           </svg>
         </button>
 
@@ -73,7 +69,7 @@
     <div id="history-popover" class="chat-bubble-popover hidden">
       <div class="popover-arrow"></div>
       <div class="popover-header">
-        <span class="popover-title">🕒 History</span>
+        <span class="popover-title">🔔 History & Notifications</span>
         <label class="popover-toggle-label" title="Enable Notifications">
           <span class="toggle-text-sm">🔔 Notifications</span>
           <div class="toggle-switch sm">
@@ -97,49 +93,27 @@
           <img src="/bunny_mascot.png" alt="Bunny Guard" class="gatekeeper-bunny-img" />
           <span class="gatekeeper-lock-badge">🔒</span>
         </div>
-        <h2 class="gatekeeper-title">UpMee Private Vault</h2>
-        <p class="gatekeeper-desc">พื้นที่แชร์ไฟล์ส่วนตัว เฉพาะเครื่องที่ได้รับอนุญาตเท่านั้น</p>
+        <h2 class="gatekeeper-title">UpMee</h2>
         <div class="gatekeeper-status-pill">
           <span class="status-dot-amber"></span>
-          <span id="gatekeeper-pill-text">เครื่องนี้ยังไม่ได้รับการลงทะเบียน (Locked)</span>
+          <span id="gatekeeper-pill-text">🔒 Locked</span>
         </div>
       </div>
 
       <form id="gatekeeper-unlock-form" class="gatekeeper-form">
         <div class="form-group">
-          <label for="gatekeeper-passphrase-input">Master Passphrase (รหัสผ่านหลัก)</label>
+          <label for="gatekeeper-passphrase-input">Password</label>
           <div class="input-with-eye">
-            <input type="password" id="gatekeeper-passphrase-input" placeholder="ใส่รหัสผ่านลับของคุณ..." autocomplete="current-password" required />
+            <input type="password" id="gatekeeper-passphrase-input" placeholder="******" autocomplete="current-password" required />
             <button type="button" id="gatekeeper-toggle-pwd-btn" class="pwd-toggle-btn" title="Show/Hide Password">👁️</button>
           </div>
           <p id="gatekeeper-error-msg" class="gatekeeper-error-text hidden">❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง</p>
         </div>
 
         <button type="submit" id="gatekeeper-submit-btn" class="primary-btn gatekeeper-unlock-btn">
-          <span>ปลดล็อค & ลงทะเบียนเครื่องนี้ 🐰✨</span>
+          <span>Unlock</span>
         </button>
       </form>
-
-      <div class="gatekeeper-divider">
-        <span>หรือจับคู่กับเครื่องหลัก</span>
-      </div>
-
-      <div class="gatekeeper-pair-section">
-        <button type="button" id="gatekeeper-open-pair-input-btn" class="secondary-btn" style="width: 100%;">
-          🔗 ใส่ Pairing Token / URL จากเครื่องหลัก
-        </button>
-        <div id="gatekeeper-pair-input-box" class="gatekeeper-pair-box hidden">
-          <input type="text" id="gatekeeper-pair-token-input" placeholder="วางลิงก์จับคู่ (Pairing Link) ที่นี่..." />
-          <button type="button" id="gatekeeper-apply-token-btn" class="primary-btn sm-btn">ยืนยัน</button>
-        </div>
-      </div>
-
-      <div class="gatekeeper-security-footer">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        </svg>
-        <span>Zero-Knowledge AES-GCM 256-bit Encryption</span>
-      </div>
     </section>
 
     <!-- App Main Content Container (Visible only when device is verified) -->
@@ -186,9 +160,8 @@
             <div class="cloud-title-block">
               <div class="cloud-title-row">
                 <h2 class="cloud-section-title">Cloud Storage</h2>
-                <span id="cloud-file-count" class="cloud-count-pill">0 items</span>
+                <span id="cloud-file-count" class="cloud-count-circle">0</span>
               </div>
-              <p class="cloud-section-subtitle">Uploaded files & quick shares</p>
             </div>
           </div>
 
@@ -209,7 +182,7 @@
                 <polyline points="7 10 12 15 17 10"/>
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
-              <span class="action-btn-text">Zip All</span>
+              <span class="action-btn-text">Download All</span>
             </button>
 
             <!-- Refresh Button -->
@@ -276,12 +249,12 @@
         <form id="share-form" class="inner-form">
           <div class="form-group">
             <label for="text-content">Message / Link</label>
-            <textarea id="text-content" rows="3" placeholder="text here"></textarea>
+            <textarea id="text-content" rows="3" placeholder="Text Here"></textarea>
           </div>
 
           <div class="form-group">
             <div class="label-with-count">
-              <label>แนบไฟล์ (เลือกได้หลายไฟล์ ไม่เกิน 50MB ต่อไฟล์)</label>
+              <label>แนบไฟล์ (ไม่เกิน 50MB)</label>
               <span id="queue-file-count-badge" class="queue-badge hidden">0 files</span>
             </div>
             <div id="dropzone" class="file-dropzone cloud-look-dropzone">
@@ -302,8 +275,7 @@
                     </defs>
                   </svg>
                 </div>
-                <p class="dropzone-title">อัพโหลดไฟล์ (เลือกได้หลายไฟล์)</p>
-                <p class="dropzone-subtitle">คลิกหรือลากไฟล์มาวางพร้อมกันได้ ไม่เกิน 50MB/ไฟล์</p>
+                <p class="dropzone-title">Upload Files</p>
               </div>
 
               <!-- Multi-file preview container -->
@@ -325,12 +297,26 @@
           </div>
 
           <div class="form-group">
-            <label>ระยะเวลาหมดอายุไฟล์</label>
-            <div class="expiry-pills">
-              <button type="button" class="pill-btn" data-value="1h">1 ชม.</button>
-              <button type="button" class="pill-btn" data-value="8h">8 ชม.</button>
-              <button type="button" class="pill-btn active" data-value="24h">24 ชม.</button>
-              <button type="button" class="pill-btn" data-value="7d">1 อาทิตย์</button>
+            <div class="expiry-slider-header">
+              <label for="expiry-range-slider">ระยะเวลาหมดอายุไฟล์</label>
+              <span id="expiry-slider-value" class="expiry-value-pill">24 ชม.</span>
+            </div>
+            <div class="expiry-slider-wrapper">
+              <input 
+                type="range" 
+                id="expiry-range-slider" 
+                min="0" 
+                max="3" 
+                step="1" 
+                value="2" 
+                class="expiry-range-input" 
+              />
+              <div class="expiry-slider-ticks">
+                <span class="slider-tick" data-index="0" data-value="1h">1 ชม.</span>
+                <span class="slider-tick" data-index="1" data-value="8h">8 ชม.</span>
+                <span class="slider-tick active" data-index="2" data-value="24h">24 ชม.</span>
+                <span class="slider-tick" data-index="3" data-value="7d">1 อาทิตย์</span>
+              </div>
             </div>
           </div>
 
@@ -343,7 +329,7 @@
     </main>
     </div><!-- End #app-main-content -->
 
-    <!-- Supabase Config & Device Authorization Settings Modal -->
+    <!-- Supabase Config & Security Settings Modal -->
     <div id="config-modal" class="modal-backdrop hidden">
       <div class="modal-card">
         <div class="modal-header">
@@ -351,22 +337,12 @@
           <button id="close-modal-btn" class="close-btn">&times;</button>
         </div>
         <div class="modal-body">
-          <!-- Device Authorization & Pairing Section -->
+          <!-- Security Section -->
           <div class="settings-section">
-            <h4 class="settings-section-title">📱 Device Authorization & Pairing</h4>
-            <div class="e2ee-key-status-box">
-              <div class="e2ee-status-row">
-                <span id="settings-device-status-pill" class="e2ee-status-pill protected">✅ Trusted Device</span>
-                <span id="settings-key-fingerprint" class="key-fingerprint-pill">----</span>
-              </div>
-              <p class="e2ee-hint-text">เครื่องนี้ได้รับอนุญาตให้ดูและถอดรหัสไฟล์ใน Private Vault เรียบร้อยแล้ว</p>
-            </div>
-            <div class="e2ee-actions-grid">
-              <button type="button" id="settings-pair-device-btn" class="e2ee-action-btn">
-                <span>🔗 Pair New Device</span>
-              </button>
+            <h4 class="settings-section-title">🔒 Security</h4>
+            <div class="e2ee-actions-grid" style="grid-template-columns: 1fr;">
               <button type="button" id="settings-revoke-device-btn" class="e2ee-action-btn danger">
-                <span>🔒 Revoke Access</span>
+                <span>🔒 Lock This Device</span>
               </button>
             </div>
           </div>
@@ -386,25 +362,6 @@
         </div>
         <div class="modal-footer">
           <button id="save-config-btn" class="primary-btn">Save</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Device Pairing QR Modal -->
-    <div id="pair-device-modal" class="modal-backdrop hidden">
-      <div class="modal-card text-center" style="align-items: center; max-width: 380px;">
-        <div class="modal-header" style="width: 100%;">
-          <h3>🔗 Pair New Device</h3>
-          <button id="close-pair-modal-btn" class="close-btn">&times;</button>
-        </div>
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px 0; width: 100%;">
-          <p style="font-size: var(--font-xs); color: var(--text-secondary); text-align: center; margin: 0 8px;">
-            สแกน QR Code นี้จากมือถือหรือแท็บเล็ตเครื่องใหม่ เพื่อลงทะเบียนและปลดล็อคเครื่องทันที 🐰📱
-          </p>
-          <canvas id="pair-modal-canvas" style="border-radius: 16px; box-shadow: 0 4px 16px rgba(236,72,153,0.15);"></canvas>
-          <button type="button" id="copy-pair-link-btn" class="secondary-btn" style="width: 100%; padding: 8px 12px;">
-            📋 คัดลอก Pairing Link
-          </button>
         </div>
       </div>
     </div>

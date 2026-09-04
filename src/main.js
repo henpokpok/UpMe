@@ -19,11 +19,8 @@ import {
   initializeEncryptionKey,
   isDeviceAuthorized,
   unlockWithPassphrase,
-  unlockWithPairingToken,
   revokeDeviceAuthorization,
-  getKeyFingerprint,
-  getActiveCryptoKey,
-  getPairingUrl
+  getActiveCryptoKey
 } from './crypto.js';
 
 // Local Storage Key for Accessed Items
@@ -103,7 +100,9 @@ const popoverNotifyToggle = document.getElementById('popover-notify-toggle');
 const forceRegisterPushBtn = document.getElementById('force-register-push-btn');
 const historyListContainer = document.getElementById('history-list-container');
 
-const pillBtns = document.querySelectorAll('.pill-btn');
+const expiryRangeSlider = document.getElementById('expiry-range-slider');
+const expirySliderValue = document.getElementById('expiry-slider-value');
+const sliderTicks = document.querySelectorAll('.slider-tick');
 const textContent = document.getElementById('text-content');
 const fileInput = document.getElementById('file-input');
 const dropzone = document.getElementById('dropzone');
@@ -140,6 +139,7 @@ const closeModalBtn = document.getElementById('close-modal-btn');
 const saveConfigBtn = document.getElementById('save-config-btn');
 const cfgUrl = document.getElementById('cfg-url');
 const cfgKey = document.getElementById('cfg-key');
+const settingsRevokeDeviceBtn = document.getElementById('settings-revoke-device-btn');
 
 const itemModal = document.getElementById('item-modal');
 const closeItemModalBtn = document.getElementById('close-item-modal-btn');
@@ -161,33 +161,14 @@ const qrNativeShareBtn = document.getElementById('qr-native-share-btn');
 const pwaInstallBtn = document.getElementById('pwa-install-btn');
 const toast = document.getElementById('toast');
 
-// Gatekeeper & Device Authorization Elements
+// Gatekeeper Elements
 const vaultGatekeeper = document.getElementById('vault-gatekeeper');
 const appMainContent = document.getElementById('app-main-content');
-const headerVaultBadge = document.getElementById('header-vault-badge');
-const vaultBadgeText = document.getElementById('vault-badge-text');
-
 const gatekeeperUnlockForm = document.getElementById('gatekeeper-unlock-form');
 const gatekeeperPassInput = document.getElementById('gatekeeper-passphrase-input');
 const gatekeeperTogglePwdBtn = document.getElementById('gatekeeper-toggle-pwd-btn');
 const gatekeeperSubmitBtn = document.getElementById('gatekeeper-submit-btn');
 const gatekeeperErrorMsg = document.getElementById('gatekeeper-error-msg');
-const gatekeeperOpenPairBtn = document.getElementById('gatekeeper-open-pair-input-btn');
-const gatekeeperPairBox = document.getElementById('gatekeeper-pair-input-box');
-const gatekeeperPairInput = document.getElementById('gatekeeper-pair-token-input');
-const gatekeeperApplyTokenBtn = document.getElementById('gatekeeper-apply-token-btn');
-
-// Settings Device Pairing Elements
-const settingsPairDeviceBtn = document.getElementById('settings-pair-device-btn');
-const settingsRevokeDeviceBtn = document.getElementById('settings-revoke-device-btn');
-const settingsKeyFingerprint = document.getElementById('settings-key-fingerprint');
-const settingsDeviceStatusPill = document.getElementById('settings-device-status-pill');
-
-// Pairing Modal Elements
-const pairDeviceModal = document.getElementById('pair-device-modal');
-const closePairModalBtn = document.getElementById('close-pair-modal-btn');
-const pairModalCanvas = document.getElementById('pair-modal-canvas');
-const copyPairLinkBtn = document.getElementById('copy-pair-link-btn');
 
 // In-Memory Decrypted Image Blob Cache
 const imageBlobUrlCache = new Map();
@@ -219,12 +200,11 @@ function revokeBlobUrlForPath(storagePath) {
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', async () => {
   initHistoryPopover();
-  initPills();
+  initExpirySlider();
   initDropzone();
   initForms();
   initBatchActions();
   initSettingsModal();
-  initDevicePairingSettings();
   initItemModal();
   initQrModal();
   initPWA();
@@ -525,6 +505,12 @@ async function openHistoryPopover() {
       </div>
     `;
 
+    rowEl.addEventListener('click', (e) => {
+      if (e.target.closest('.delete-history-btn')) return;
+      closeHistoryPopover();
+      openItemPreviewModal(item);
+    });
+
     const deleteBtn = rowEl.querySelector('.delete-history-btn');
     deleteBtn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -598,15 +584,51 @@ function initRealtimeSubscription() {
   });
 }
 
-// --- Expiration Pill Selector ---
-function initPills() {
-  pillBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      pillBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      selectedDurationKey = btn.getAttribute('data-value');
+// --- Expiration Range Slider & Tick Selector ---
+const EXPIRY_DURATIONS = [
+  { key: '1h', label: '1 ชม.' },
+  { key: '8h', label: '8 ชม.' },
+  { key: '24h', label: '24 ชม.' },
+  { key: '7d', label: '1 อาทิตย์' }
+];
+
+function initExpirySlider() {
+  if (!expiryRangeSlider) return;
+
+  function updateSliderVisuals(index) {
+    const clampedIndex = Math.max(0, Math.min(EXPIRY_DURATIONS.length - 1, Number(index)));
+    const duration = EXPIRY_DURATIONS[clampedIndex];
+    selectedDurationKey = duration.key;
+    if (expirySliderValue) {
+      expirySliderValue.textContent = duration.label;
+    }
+    sliderTicks.forEach((tick, i) => {
+      if (i === clampedIndex) {
+        tick.classList.add('active');
+      } else {
+        tick.classList.remove('active');
+      }
+    });
+
+    const percent = (clampedIndex / (EXPIRY_DURATIONS.length - 1)) * 100;
+    expiryRangeSlider.style.background = `linear-gradient(to right, #ec4899 0%, #ec4899 ${percent}%, #fce7f3 ${percent}%, #fce7f3 100%)`;
+  }
+
+  expiryRangeSlider.addEventListener('input', (e) => {
+    updateSliderVisuals(e.target.value);
+  });
+
+  sliderTicks.forEach((tick) => {
+    tick.addEventListener('click', () => {
+      const idx = tick.getAttribute('data-index');
+      if (idx !== null && idx !== undefined) {
+        expiryRangeSlider.value = idx;
+        updateSliderVisuals(idx);
+      }
     });
   });
+
+  updateSliderVisuals(expiryRangeSlider.value || 2);
 }
 
 // --- Multi-File Selection & Dropzone Handlers ---
@@ -1172,11 +1194,11 @@ async function refreshAppFeed() {
       storageProgressFill.style.width = `${Math.max(0, Math.min(100, percentageNum))}%`;
     }
 
-    // 3. Update count pill
+    // 3. Update count circle badge
     const countPill = document.getElementById('cloud-file-count');
     if (countPill) {
       const total = currentSharesList.length;
-      countPill.textContent = `${total} ${total === 1 ? 'item' : 'items'}`;
+      countPill.textContent = `${total}`;
     }
 
     // 4. Render Cloud Feed Items
@@ -1650,6 +1672,18 @@ function initSettingsModal() {
     });
   }
 
+  if (settingsRevokeDeviceBtn) {
+    settingsRevokeDeviceBtn.addEventListener('click', () => {
+      if (confirm('คุณแน่ใจหรือไม่ว่าต้องการล็อคเครื่องนี้? หลังจากนี้จะต้องใส่ Password ใหม่เพื่อเข้าใช้งาน')) {
+        revokeDeviceAuthorization();
+        closeModalBtnHandler();
+        updateVaultUIState(false);
+        if (liveFeedContainer) liveFeedContainer.innerHTML = '';
+        showToast('🔒 ล็อคเครื่องนี้เรียบร้อยแล้ว');
+      }
+    });
+  }
+
   // Save Supabase Settings
   if (saveConfigBtn) {
     saveConfigBtn.addEventListener('click', () => {
@@ -1671,18 +1705,6 @@ function openSettingsModal() {
   const { url, key } = getSupabaseConfig();
   if (cfgUrl) cfgUrl.value = url;
   if (cfgKey) cfgKey.value = key;
-  if (settingsDeviceStatusPill) {
-    if (isDeviceAuthorized()) {
-      settingsDeviceStatusPill.textContent = '✅ Trusted Device';
-      settingsDeviceStatusPill.className = 'e2ee-status-pill protected';
-    } else {
-      settingsDeviceStatusPill.textContent = '🔒 Not Authorized';
-      settingsDeviceStatusPill.className = 'e2ee-status-pill warning';
-    }
-  }
-  if (settingsKeyFingerprint) {
-    settingsKeyFingerprint.textContent = isDeviceAuthorized() ? (getKeyFingerprint() || '----') : '----';
-  }
   if (configModal) configModal.classList.remove('hidden');
 }
 
@@ -1723,41 +1745,17 @@ function initPWA() {
   }
 }
 
-// --- Device Gatekeeper & Vault Security UI ---
+// --- Device Gatekeeper UI ---
 function updateVaultUIState(isAuthorized) {
   if (isAuthorized) {
     if (vaultGatekeeper) vaultGatekeeper.classList.add('hidden');
     if (appMainContent) appMainContent.classList.remove('hidden');
-    if (headerVaultBadge) {
-      headerVaultBadge.classList.remove('vault-locked');
-      headerVaultBadge.classList.add('vault-unlocked');
-    }
-    if (vaultBadgeText) vaultBadgeText.textContent = 'Vault Active';
-    if (settingsDeviceStatusPill) {
-      settingsDeviceStatusPill.textContent = '✅ Trusted Device';
-      settingsDeviceStatusPill.className = 'e2ee-status-pill protected';
-    }
-    if (settingsKeyFingerprint) {
-      settingsKeyFingerprint.textContent = getKeyFingerprint() || '----';
-    }
     if (pwaInstallBtn && deferredPwaPrompt) {
       pwaInstallBtn.classList.remove('hidden');
     }
   } else {
     if (vaultGatekeeper) vaultGatekeeper.classList.remove('hidden');
     if (appMainContent) appMainContent.classList.add('hidden');
-    if (headerVaultBadge) {
-      headerVaultBadge.classList.remove('vault-unlocked');
-      headerVaultBadge.classList.add('vault-locked');
-    }
-    if (vaultBadgeText) vaultBadgeText.textContent = 'Vault Locked';
-    if (settingsDeviceStatusPill) {
-      settingsDeviceStatusPill.textContent = '🔒 Not Authorized';
-      settingsDeviceStatusPill.className = 'e2ee-status-pill warning';
-    }
-    if (settingsKeyFingerprint) {
-      settingsKeyFingerprint.textContent = '----';
-    }
     if (pwaInstallBtn) {
       pwaInstallBtn.classList.add('hidden');
     }
@@ -1767,25 +1765,10 @@ function updateVaultUIState(isAuthorized) {
 let gatekeeperInitialized = false;
 
 async function initDeviceGatekeeper() {
-  // 1. Initialize encryption key & check pairing params in URL
-  const initRes = await initializeEncryptionKey();
+  // 1. Initialize encryption key
+  await initializeEncryptionKey();
   const authorized = isDeviceAuthorized();
   updateVaultUIState(authorized);
-
-  if (initRes && initRes.paired) {
-    showToast('📱 จับคู่อุปกรณ์สำเร็จ! ปลดล็อคห้องนิรภัยแล้ว 🐰💖');
-  }
-
-  // Hook header vault badge click
-  if (headerVaultBadge) {
-    headerVaultBadge.addEventListener('click', () => {
-      if (isDeviceAuthorized()) {
-        openSettingsModal();
-      } else {
-        if (gatekeeperPassInput) gatekeeperPassInput.focus();
-      }
-    });
-  }
 
   if (gatekeeperInitialized) return;
   gatekeeperInitialized = true;
@@ -1799,41 +1782,7 @@ async function initDeviceGatekeeper() {
     });
   }
 
-  // Toggle Pairing input box
-  if (gatekeeperOpenPairBtn && gatekeeperPairBox) {
-    gatekeeperOpenPairBtn.addEventListener('click', () => {
-      gatekeeperPairBox.classList.toggle('hidden');
-      if (!gatekeeperPairBox.classList.contains('hidden') && gatekeeperPairInput) {
-        gatekeeperPairInput.focus();
-      }
-    });
-  }
-
-  // Apply Pairing Token / Link
-  if (gatekeeperApplyTokenBtn && gatekeeperPairInput) {
-    gatekeeperApplyTokenBtn.addEventListener('click', async () => {
-      const token = gatekeeperPairInput.value.trim();
-      if (!token) {
-        showToast('⚠️ กรุณากรอก Pairing Token หรือ ลิงก์จับคู่');
-        return;
-      }
-      try {
-        await unlockWithPairingToken(token);
-        updateVaultUIState(true);
-        showToast('📱 เชื่อมต่อและลงทะเบียนเครื่องสำเร็จ! 🐰💖');
-        await refreshAppFeed();
-      } catch (err) {
-        console.error('Pairing error:', err);
-        showToast('❌ Token ไม่ถูกต้องหรือไม่สามารถถอดรหัสได้');
-        if (vaultGatekeeper) {
-          vaultGatekeeper.classList.add('shake');
-          setTimeout(() => vaultGatekeeper.classList.remove('shake'), 600);
-        }
-      }
-    });
-  }
-
-  // Submit Passphrase
+  // Submit Password
   if (gatekeeperUnlockForm && gatekeeperPassInput) {
     gatekeeperUnlockForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -1842,7 +1791,7 @@ async function initDeviceGatekeeper() {
 
       if (gatekeeperSubmitBtn) {
         gatekeeperSubmitBtn.disabled = true;
-        gatekeeperSubmitBtn.innerHTML = '<span>กำลังตรวจสอบรหัส... ⏳</span>';
+        gatekeeperSubmitBtn.innerHTML = '<span>Verifying... ⏳</span>';
       }
 
       try {
@@ -1855,7 +1804,7 @@ async function initDeviceGatekeeper() {
           if (gatekeeperErrorMsg) gatekeeperErrorMsg.classList.add('hidden');
           gatekeeperPassInput.value = '';
           updateVaultUIState(true);
-          showToast('🔓 ปลดล็อค & ยืนยันเครื่องสำเร็จเรียบร้อย! 🐰✨');
+          showToast('🔓 Unlocked! 🐰✨');
           await refreshAppFeed();
         } else {
           if (gatekeeperErrorMsg) gatekeeperErrorMsg.classList.remove('hidden');
@@ -1872,105 +1821,9 @@ async function initDeviceGatekeeper() {
       } finally {
         if (gatekeeperSubmitBtn) {
           gatekeeperSubmitBtn.disabled = false;
-          gatekeeperSubmitBtn.innerHTML = '<span>ปลดล็อค & ลงทะเบียนเครื่องนี้ 🐰✨</span>';
+          gatekeeperSubmitBtn.innerHTML = '<span>Unlock</span>';
         }
       }
     });
   }
-}
-
-// --- Device Pairing in Settings Modal ---
-let currentPairingUrl = null;
-
-function initDevicePairingSettings() {
-  if (settingsPairDeviceBtn) {
-    settingsPairDeviceBtn.addEventListener('click', async () => {
-      if (!isDeviceAuthorized()) {
-        showToast('⚠️ กรุณาปลดล็อคเครื่องนี้ก่อนจับคู่อุปกรณ์อื่น');
-        return;
-      }
-      try {
-        const pairUrl = await getPairingUrl();
-        if (!pairUrl) {
-          showToast('❌ ไม่พบคีย์เข้ารหัส กรุณาปลดล็อคใหม่อีกครั้ง');
-          return;
-        }
-        currentPairingUrl = pairUrl;
-        openPairDeviceModal(pairUrl);
-      } catch (err) {
-        console.error('Failed to generate pairing url:', err);
-        showToast('❌ ไม่สามารถสร้างรหัสจับคู่ได้');
-      }
-    });
-  }
-
-  if (settingsRevokeDeviceBtn) {
-    settingsRevokeDeviceBtn.addEventListener('click', () => {
-      if (confirm('คุณแน่ใจหรือไม่ว่าต้องการยกเลิกการอนุญาตเครื่องนี้? หลังจากนี้เครื่องนี้จะไม่สามารถดูหรือดาวน์โหลดไฟล์ใน Vault ได้')) {
-        revokeDeviceAuthorization();
-        closeModalBtnHandler();
-        updateVaultUIState(false);
-        if (liveFeedContainer) liveFeedContainer.innerHTML = '';
-        showToast('🔒 ยกเลิกการอนุญาตเครื่องนี้แล้ว');
-      }
-    });
-  }
-
-  if (closePairModalBtn) {
-    closePairModalBtn.addEventListener('click', closePairDeviceModal);
-  }
-
-  if (pairDeviceModal) {
-    pairDeviceModal.addEventListener('click', (e) => {
-      if (e.target === pairDeviceModal) closePairDeviceModal();
-    });
-  }
-
-  if (copyPairLinkBtn) {
-    copyPairLinkBtn.addEventListener('click', async () => {
-      if (currentPairingUrl) {
-        await copyToClipboard(currentPairingUrl, '📋 คัดลอก Pairing Link เรียบร้อย!');
-      }
-    });
-  }
-}
-
-function openPairDeviceModal(pairUrl) {
-  if (!pairDeviceModal || !pairModalCanvas) return;
-  QRCode.toCanvas(pairModalCanvas, pairUrl, {
-    width: 220,
-    margin: 2,
-    errorCorrectionLevel: 'H',
-    color: {
-      dark: '#ec4899',
-      light: '#ffffff'
-    }
-  }, (err) => {
-    if (err) {
-      console.error('QR code error for pairing:', err);
-      return;
-    }
-    const ctx = pairModalCanvas.getContext('2d');
-    const logo = new Image();
-    logo.src = '/bunny_mascot.png';
-    logo.onload = () => {
-      const logoSize = pairModalCanvas.width * 0.24;
-      const center = (pairModalCanvas.width - logoSize) / 2;
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.arc(pairModalCanvas.width / 2, pairModalCanvas.height / 2, logoSize / 2 + 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.drawImage(logo, center, center, logoSize, logoSize);
-    };
-    logo.onerror = () => {
-      console.warn('Bunny mascot logo could not be loaded for QR overlay');
-    };
-  });
-
-  pairDeviceModal.classList.remove('hidden');
-}
-
-function closePairDeviceModal() {
-  if (pairDeviceModal) pairDeviceModal.classList.add('hidden');
-  currentPairingUrl = null;
 }
