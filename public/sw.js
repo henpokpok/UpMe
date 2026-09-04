@@ -84,14 +84,14 @@ self.addEventListener('push', (event) => {
     if (event.data) {
       payloadData = event.data.json();
       const isEncrypted = typeof payloadData.content === 'string' && (
-        payloadData.content.startsWith('{"v":1,"e2ee":true') ||
-        (payloadData.file_name && payloadData.file_name.includes('[E2EE Encrypted File]'))
+        payloadData.content.includes('"e2ee":true') ||
+        (payloadData.file_name && (payloadData.file_name.includes('[E2EE') || payloadData.file_name.includes('Encrypted File')))
       );
       const isFile = payloadData.type === 'file' || payloadData.type === 'both' || Boolean(payloadData.file_name);
       const isImage = isFile && payloadData.file_name && /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(payloadData.file_name);
 
       if (isEncrypted) {
-        bodyText = '🔒 ได้รับรายการใหม่ (เข้ารหัส E2EE)';
+        bodyText = '🔒 ได้รับรายการใหม่ใน Private Vault (E2EE Protected)';
       } else if (isFile) {
         bodyText = `ไฟล์ใหม่: ${payloadData.file_name || 'ไฟล์แนบ'}`;
         if (isImage && payloadData.content && (payloadData.content.startsWith('http://') || payloadData.content.startsWith('https://'))) {

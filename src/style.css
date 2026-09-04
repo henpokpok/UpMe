@@ -1696,6 +1696,220 @@ textarea:focus, input:focus {
 }
 
 /* ==========================================================================
+   Gatekeeper Lock Screen & Device Authorization Styles
+   ========================================================================== */
+.gatekeeper-card {
+  position: relative;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.98) 0%, rgba(253, 242, 248, 0.95) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1.5px solid rgba(244, 114, 182, 0.35);
+  border-radius: 28px;
+  padding: 24px 20px;
+  box-shadow: 
+    0 20px 48px -12px rgba(244, 114, 182, 0.22),
+    0 6px 20px rgba(168, 85, 247, 0.1),
+    inset 0 1px 2px rgba(255, 255, 255, 0.95);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: popoverFade 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.gatekeeper-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+}
+
+.gatekeeper-icon-box {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  margin-bottom: 4px;
+}
+
+.gatekeeper-bunny-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--accent-pink);
+  box-shadow: 0 4px 16px rgba(236, 72, 153, 0.25);
+}
+
+.gatekeeper-lock-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  font-size: 1.25rem;
+  background: #ffffff;
+  border-radius: 50%;
+  padding: 2px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.gatekeeper-title {
+  font-family: 'Fredoka', 'Kanit', sans-serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.gatekeeper-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 320px;
+}
+
+.gatekeeper-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #fef3c7;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  margin-top: 4px;
+}
+
+.status-dot-amber {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+  animation: pulseDot 2s infinite;
+}
+
+.gatekeeper-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.input-with-eye {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-eye input {
+  padding-right: 40px;
+}
+
+.pwd-toggle-btn {
+  position: absolute;
+  right: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px;
+  color: var(--text-muted);
+  transition: var(--transition);
+}
+
+.pwd-toggle-btn:hover {
+  transform: scale(1.1);
+  color: var(--text-primary);
+}
+
+.gatekeeper-error-text {
+  font-size: 0.75rem;
+  color: var(--danger-red);
+  font-weight: 600;
+  margin-top: 4px;
+  animation: popoverFade 0.2s ease;
+}
+
+.gatekeeper-unlock-btn {
+  padding: 12px 20px;
+  font-size: 0.95rem;
+  border-radius: 22px;
+}
+
+.gatekeeper-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin: 2px 0;
+}
+
+.gatekeeper-divider::before,
+.gatekeeper-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px dashed var(--card-border);
+}
+
+.gatekeeper-divider span {
+  padding: 0 10px;
+}
+
+.gatekeeper-pair-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gatekeeper-pair-box {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  animation: popoverFade 0.2s ease;
+}
+
+.gatekeeper-pair-box input {
+  flex: 1;
+  font-size: 0.8rem;
+  padding: 7px 10px;
+}
+
+.gatekeeper-pair-box .sm-btn {
+  width: auto;
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  border-radius: 12px;
+}
+
+.gatekeeper-security-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #059669;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 14px;
+  padding: 6px 12px;
+  margin-top: 4px;
+}
+
+/* Shake Animation on Wrong Password */
+@keyframes shakeLock {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+.shake {
+  animation: shakeLock 0.4s ease-in-out;
+}
+
+/* ==========================================================================
    Performance Optimizations & CPU Throttling
    ========================================================================== */
 body.tab-hidden * {

@@ -143,3 +143,75 @@ test('E2EE Crypto: Graceful Handling of Legacy / Unencrypted Data', async () => 
   const binResult = await decryptBinary(legacyBinary, key);
   assert.deepStrictEqual(new Uint8Array(binResult), legacyBinary, 'Legacy binary should be returned as-is');
 });
+
+test('Device Gatekeeper: Authorization Lifecycle and Token Pairing', async () => {
+  const {
+    isDeviceAuthorized,
+    markDeviceAuthorized,
+    revokeDeviceAuthorization,
+    unlockWithPassphrase,
+    unlockWithPairingToken,
+    getPairingUrl,
+    getActiveCryptoKey
+  } = await import('../src/crypto.js');
+
+  // Test reset
+  revokeDeviceAuthorization();
+  assert.strictEqual(isDeviceAuthorized(), false, 'Device should not be authorized after revoke');
+
+  // Unlock with Passphrase
+  const masterPass = 'MyUltraSecureVaultKey2026!';
+  const key = await unlockWithPassphrase(masterPass);
+  assert.ok(key, 'Key should be derived from passphrase');
+  assert.strictEqual(isDeviceAuthorized(), true, 'Device should be marked authorized');
+
+  // Generate pairing URL
+  const pairUrl = await getPairingUrl();
+  assert.ok(pairUrl, 'Pairing URL should be generated');
+  assert.match(pairUrl, /#key=/, 'Pairing URL should contain #key=');
+
+  // Revoke device
+  revokeDeviceAuthorization();
+  assert.strictEqual(isDeviceAuthorized(), false);
+  assert.strictEqual(getActiveCryptoKey(), null);
+
+  // Pair device via the pairing URL
+  const pairedKey = await unlockWithPairingToken(pairUrl);
+  assert.ok(pairedKey, 'Should successfully import key from pairing URL');
+  assert.strictEqual(isDeviceAuthorized(), true, 'Device should be authorized via paired key');
+
+  // Clean up
+  revokeDeviceAuthorization();
+});
+
+test('Zero-Knowledge Challenge: Vault Challenge Verification Logic', async () => {
+  const {
+    deriveKeyFromPassphrase,
+    encryptText,
+    decryptText
+  } = await import('../src/crypto.js');
+
+  const correctPass = 'MasterPassword123!';
+  const wrongPass = 'WrongPassword456!';
+
+  const masterKey = await deriveKeyFromPassphrase(correctPass);
+  const challengeSecret = 'UPMEE_VAULT_ACTIVE_SECRET';
+
+  // Device A creates encrypted challenge in Supabase
+  const encryptedChallenge = await encryptText(challengeSecret, masterKey);
+
+  // Device B attempts to verify with correct password
+  const testKeyCorrect = await deriveKeyFromPassphrase(correctPass);
+  const decryptedSecret = await decryptText(encryptedChallenge, testKeyCorrect);
+  assert.strictEqual(decryptedSecret, challengeSecret, 'Correct password must decrypt challenge secret successfully');
+
+  // Device C attempts to verify with wrong password
+  const testKeyWrong = await deriveKeyFromPassphrase(wrongPass);
+  await assert.rejects(
+    async () => {
+      await decryptText(encryptedChallenge, testKeyWrong);
+    },
+    'Wrong password must fail AES-GCM tag verification and reject'
+  );
+});
+

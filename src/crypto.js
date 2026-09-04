@@ -27,6 +27,7 @@ function getRandomValues(array) {
 // Storage Keys
 export const STORAGE_E2EE_KEY = 'upme_e2ee_key_b64';
 export const STORAGE_E2EE_PASSPHRASE = 'upme_e2ee_passphrase';
+export const STORAGE_DEVICE_AUTHORIZED = 'upme_device_authorized';
 
 // Constants
 const PBKDF2_SALT = new TextEncoder().encode('UpMe-E2EE-PBKDF2-Salt-v1');
@@ -352,70 +353,156 @@ export function setActiveCryptoKey(key) {
   activeCryptoKey = key;
 }
 
+// In-Memory Storage Fallback (for Node.js test environment or when localStorage is unavailable)
+const memoryStorage = new Map();
+
+function getStorageItem(key) {
+  if (typeof localStorage !== 'undefined') {
+    return localStorage.getItem(key);
+  }
+  return memoryStorage.get(key) || null;
+}
+
+function setStorageItem(key, val) {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(key, val);
+  } else {
+    memoryStorage.set(key, String(val));
+  }
+}
+
+function removeStorageItem(key) {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem(key);
+  } else {
+    memoryStorage.delete(key);
+  }
+}
+
 /**
- * Load encryption key from localStorage or URL hash/query (#key=..., ?key=..., #passphrase=..., ?passphrase=...)
- * Automatically generates a key if none exists on first launch.
+ * Check if the current device is authorized (has a valid active key and marked as trusted)
+ */
+export function isDeviceAuthorized() {
+  return getStorageItem(STORAGE_DEVICE_AUTHORIZED) === 'true' && Boolean(getActiveCryptoKey());
+}
+
+/**
+ * Mark or revoke authorization status for this device
+ */
+export function markDeviceAuthorized(authorized = true) {
+  if (authorized) {
+    setStorageItem(STORAGE_DEVICE_AUTHORIZED, 'true');
+  } else {
+    removeStorageItem(STORAGE_DEVICE_AUTHORIZED);
+    clearStoredEncryptionKey();
+  }
+}
+
+/**
+ * Unlock and register this device using Master Passphrase
+ */
+export async function unlockWithPassphrase(passphrase) {
+  if (!passphrase || typeof passphrase !== 'string') {
+    throw new Error('Passphrase must be a non-empty string');
+  }
+  const cleanPass = passphrase.trim();
+  const key = await deriveKeyFromPassphrase(cleanPass);
+  await saveEncryptionKey(key, cleanPass);
+  markDeviceAuthorized(true);
+  return key;
+}
+
+/**
+ * Unlock and register this device using a pairing token or URL from another authorized device
+ */
+export async function unlockWithPairingToken(token) {
+  const parsed = parseKeyOrPassphraseInput(token);
+  if (!parsed) throw new Error('Invalid pairing token or URL');
+  let key;
+  if (parsed.type === 'base64_key') {
+    key = await importKeyFromBase64(parsed.value);
+    await saveEncryptionKey(key, null);
+  } else if (parsed.type === 'hex_key') {
+    const rawBytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+      rawBytes[i] = parseInt(parsed.value.substr(i * 2, 2), 16);
+    }
+    const subtle = getSubtleCrypto();
+    key = await subtle.importKey('raw', rawBytes, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
+    await saveEncryptionKey(key, null);
+  } else {
+    key = await deriveKeyFromPassphrase(parsed.value);
+    await saveEncryptionKey(key, parsed.value);
+  }
+  markDeviceAuthorized(true);
+  return key;
+}
+
+/**
+ * Revoke authorization on this device
+ */
+export function revokeDeviceAuthorization() {
+  markDeviceAuthorized(false);
+}
+
+/**
+ * Load encryption key from localStorage or URL hash/query (#pair=..., #key=..., ?pair=..., ?key=...)
+ * If unauthorized, returns key: null so Gatekeeper screen can be displayed.
  */
 export async function initializeEncryptionKey() {
   // 1. Check URL Hash Fragment or Search Query for pairing
   if (typeof window !== 'undefined' && window.location) {
+    let pairParam = null;
     let keyParam = null;
     let passParam = null;
 
     if (window.location.hash) {
       const hashSegments = window.location.hash.split('#').slice(1);
-      const keySegment = hashSegments.find(s => s.includes('key=') || s.includes('passphrase='));
-      const cleanHash = keySegment || hashSegments[hashSegments.length - 1] || '';
-      const queryInHash = cleanHash.includes('?') ? (cleanHash.split('?').find(s => s.includes('key=') || s.includes('passphrase=')) || cleanHash.split('?')[1]) : cleanHash;
+      const pairSegment = hashSegments.find(s => s.includes('pair=') || s.includes('key=') || s.includes('passphrase='));
+      const cleanHash = pairSegment || hashSegments[hashSegments.length - 1] || '';
+      const queryInHash = cleanHash.includes('?') ? (cleanHash.split('?').find(s => s.includes('pair=') || s.includes('key=') || s.includes('passphrase=')) || cleanHash.split('?')[1]) : cleanHash;
       const hashParams = new URLSearchParams((queryInHash || '').replace(/^[/#&]+/, ''));
+      pairParam = hashParams.get('pair');
       keyParam = hashParams.get('key');
       passParam = hashParams.get('passphrase');
     }
 
-    if (!keyParam && !passParam && window.location.search) {
+    if (!pairParam && !keyParam && !passParam && window.location.search) {
       const searchParams = new URLSearchParams(window.location.search);
+      pairParam = searchParams.get('pair');
       keyParam = searchParams.get('key');
       passParam = searchParams.get('passphrase');
     }
 
-    if (keyParam) {
+    const tokenToApply = pairParam || keyParam || passParam;
+    if (tokenToApply) {
       try {
-        const key = await importKeyFromBase64(keyParam);
-        await saveEncryptionKey(key);
+        const key = await unlockWithPairingToken(tokenToApply);
         // Clear hash & query params cleanly from address bar without reloading
         const cleanUrl = window.location.pathname;
         window.history.replaceState(null, document.title, cleanUrl);
-        return { key, paired: true, source: 'url_key' };
+        return { key, paired: true, source: 'url_pairing' };
       } catch (err) {
-        console.warn('Failed to import key from URL:', err);
-      }
-    } else if (passParam) {
-      try {
-        const key = await deriveKeyFromPassphrase(passParam);
-        await saveEncryptionKey(key, passParam);
-        const cleanUrl = window.location.pathname;
-        window.history.replaceState(null, document.title, cleanUrl);
-        return { key, paired: true, source: 'url_passphrase' };
-      } catch (err) {
-        console.warn('Failed to import passphrase from URL:', err);
+        console.warn('Failed to import pairing key from URL:', err);
       }
     }
   }
 
-  // 2. Check localStorage for stored key
-  if (typeof localStorage !== 'undefined') {
-    const storedB64 = localStorage.getItem(STORAGE_E2EE_KEY);
+  // 2. Check storage for stored key (if device is marked authorized)
+  const isAuthorized = getStorageItem(STORAGE_DEVICE_AUTHORIZED) === 'true';
+  if (isAuthorized) {
+    const storedB64 = getStorageItem(STORAGE_E2EE_KEY);
     if (storedB64) {
       try {
         const key = await importKeyFromBase64(storedB64);
         setActiveCryptoKey(key);
         return { key, paired: false, source: 'localStorage' };
       } catch (err) {
-        console.warn('Failed to load stored key from localStorage:', err);
+        console.warn('Failed to load stored key from storage:', err);
       }
     }
 
-    const storedPassphrase = localStorage.getItem(STORAGE_E2EE_PASSPHRASE);
+    const storedPassphrase = getStorageItem(STORAGE_E2EE_PASSPHRASE);
     if (storedPassphrase) {
       try {
         const key = await deriveKeyFromPassphrase(storedPassphrase);
@@ -427,25 +514,22 @@ export async function initializeEncryptionKey() {
     }
   }
 
-  // 3. First Launch: Generate a random 256-bit AES-GCM Key and save it
-  const newKey = await generateRandomKey();
-  await saveEncryptionKey(newKey);
-  return { key: newKey, paired: false, source: 'auto_generated' };
+  // 3. Unregistered device: do NOT auto-generate; require authorization
+  setActiveCryptoKey(null);
+  return { key: null, paired: false, source: 'unauthorized' };
 }
 
 /**
- * Persist an encryption key into localStorage
+ * Persist an encryption key into storage
  */
 export async function saveEncryptionKey(cryptoKey, optionalPassphrase = null) {
   setActiveCryptoKey(cryptoKey);
-  if (typeof localStorage !== 'undefined') {
-    const b64 = await exportKeyToBase64(cryptoKey);
-    localStorage.setItem(STORAGE_E2EE_KEY, b64);
-    if (optionalPassphrase) {
-      localStorage.setItem(STORAGE_E2EE_PASSPHRASE, optionalPassphrase);
-    } else {
-      localStorage.removeItem(STORAGE_E2EE_PASSPHRASE);
-    }
+  const b64 = await exportKeyToBase64(cryptoKey);
+  setStorageItem(STORAGE_E2EE_KEY, b64);
+  if (optionalPassphrase) {
+    setStorageItem(STORAGE_E2EE_PASSPHRASE, optionalPassphrase);
+  } else {
+    removeStorageItem(STORAGE_E2EE_PASSPHRASE);
   }
 }
 
@@ -555,10 +639,8 @@ export async function setRawKeyBase64(base64Key) {
  */
 export function clearStoredEncryptionKey() {
   setActiveCryptoKey(null);
-  if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem(STORAGE_E2EE_KEY);
-    localStorage.removeItem(STORAGE_E2EE_PASSPHRASE);
-  }
+  removeStorageItem(STORAGE_E2EE_KEY);
+  removeStorageItem(STORAGE_E2EE_PASSPHRASE);
 }
 
 /**

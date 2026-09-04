@@ -10,8 +10,21 @@ import {
   getStorageUsageInfo,
   subscribeToRealtimeUploads,
   savePushSubscription,
-  getFilePublicUrl
+  getFilePublicUrl,
+  setupVaultChallenge,
+  verifyPassphraseAgainstVault,
+  decryptAndFetchFileBlob
 } from './supabase.js';
+import {
+  initializeEncryptionKey,
+  isDeviceAuthorized,
+  unlockWithPassphrase,
+  unlockWithPairingToken,
+  revokeDeviceAuthorization,
+  getKeyFingerprint,
+  getActiveCryptoKey,
+  getPairingUrl
+} from './crypto.js';
 
 // Local Storage Key for Accessed Items
 const ACCESSED_ITEMS_KEY = 'upme_accessed_ids';
@@ -148,19 +161,75 @@ const qrNativeShareBtn = document.getElementById('qr-native-share-btn');
 const pwaInstallBtn = document.getElementById('pwa-install-btn');
 const toast = document.getElementById('toast');
 
+// Gatekeeper & Device Authorization Elements
+const vaultGatekeeper = document.getElementById('vault-gatekeeper');
+const appMainContent = document.getElementById('app-main-content');
+const headerVaultBadge = document.getElementById('header-vault-badge');
+const vaultBadgeText = document.getElementById('vault-badge-text');
+
+const gatekeeperUnlockForm = document.getElementById('gatekeeper-unlock-form');
+const gatekeeperPassInput = document.getElementById('gatekeeper-passphrase-input');
+const gatekeeperTogglePwdBtn = document.getElementById('gatekeeper-toggle-pwd-btn');
+const gatekeeperSubmitBtn = document.getElementById('gatekeeper-submit-btn');
+const gatekeeperErrorMsg = document.getElementById('gatekeeper-error-msg');
+const gatekeeperOpenPairBtn = document.getElementById('gatekeeper-open-pair-input-btn');
+const gatekeeperPairBox = document.getElementById('gatekeeper-pair-input-box');
+const gatekeeperPairInput = document.getElementById('gatekeeper-pair-token-input');
+const gatekeeperApplyTokenBtn = document.getElementById('gatekeeper-apply-token-btn');
+
+// Settings Device Pairing Elements
+const settingsPairDeviceBtn = document.getElementById('settings-pair-device-btn');
+const settingsRevokeDeviceBtn = document.getElementById('settings-revoke-device-btn');
+const settingsKeyFingerprint = document.getElementById('settings-key-fingerprint');
+const settingsDeviceStatusPill = document.getElementById('settings-device-status-pill');
+
+// Pairing Modal Elements
+const pairDeviceModal = document.getElementById('pair-device-modal');
+const closePairModalBtn = document.getElementById('close-pair-modal-btn');
+const pairModalCanvas = document.getElementById('pair-modal-canvas');
+const copyPairLinkBtn = document.getElementById('copy-pair-link-btn');
+
+// In-Memory Decrypted Image Blob Cache
+const imageBlobUrlCache = new Map();
+async function getImageBlobUrl(storagePath) {
+  if (!storagePath) return null;
+  if (imageBlobUrlCache.has(storagePath)) return imageBlobUrlCache.get(storagePath);
+  try {
+    const blob = await decryptAndFetchFileBlob(storagePath);
+    const blobUrl = URL.createObjectURL(blob);
+    imageBlobUrlCache.set(storagePath, blobUrl);
+    return blobUrl;
+  } catch (err) {
+    console.warn('Could not decrypt image preview:', err);
+    return null;
+  }
+}
+
+function revokeBlobUrlForPath(storagePath) {
+  if (!storagePath) return;
+  if (imageBlobUrlCache.has(storagePath)) {
+    const url = imageBlobUrlCache.get(storagePath);
+    try {
+      URL.revokeObjectURL(url);
+    } catch (_) {}
+    imageBlobUrlCache.delete(storagePath);
+  }
+}
+
 // --- Initialization ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   initHistoryPopover();
   initPills();
   initDropzone();
   initForms();
   initBatchActions();
   initSettingsModal();
+  initDevicePairingSettings();
   initItemModal();
   initQrModal();
   initPWA();
   
-  refreshAppFeed();
+  await initDeviceGatekeeper();
   initRealtimeSubscription();
   checkSharedDataFromGallery();
 
@@ -174,7 +243,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (typeof document !== 'undefined' && document.body) {
         document.body.classList.remove('tab-hidden');
       }
-      debouncedRefreshAppFeed(200);
+      if (isDeviceAuthorized()) {
+        debouncedRefreshAppFeed(200);
+      }
     }
   });
 });
@@ -407,6 +478,14 @@ function initHistoryPopover() {
 async function openHistoryPopover() {
   if (!historyPopover) return;
   historyPopover.classList.remove('hidden');
+
+  if (!isDeviceAuthorized()) {
+    historyListContainer.innerHTML = `
+      <div class="empty-feed-box"><p>🔒 อุปกรณ์นี้ยังไม่ได้รับการปลดล็อคห้องนิรภัย</p></div>
+    `;
+    return;
+  }
+
   historyListContainer.innerHTML = `
     <div class="loading-spinner-box"><p>Loading history...</p></div>
   `;
@@ -709,6 +788,11 @@ function initForms() {
       return;
     }
 
+    if (!isDeviceAuthorized()) {
+      showToast('🔒 อุปกรณ์นี้ยังไม่ได้รับการปลดล็อคห้องนิรภัย');
+      return;
+    }
+
     const textVal = textContent.value.trim();
     if (!textVal && selectedFiles.length === 0) {
       showToast('⚠️ กรุณาพิมพ์ข้อความ/ลิงก์ หรือแนบไฟล์อย่างน้อย 1 อย่างนะจ๊ะ');
@@ -902,7 +986,7 @@ async function batchDeleteSelected() {
   }
 }
 
-// Robust JSZip file archiver with direct fetch and original file names
+// Robust JSZip file archiver with direct fetch, client-side decryption, and original file names
 async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.zip') {
   try {
     showToast(`⏳ กำลังบีบอัด ${itemsToDownload.length} รายการเป็นไฟล์ ZIP...`);
@@ -917,10 +1001,18 @@ async function downloadFilesAsZip(itemsToDownload, zipFileName = 'UpMee_Archive.
         const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
         const isFile = item.type === 'file' || item.type === 'both' || Boolean(item.storage_path);
 
-        if (isFile && fileUrl) {
+        if (isFile) {
           try {
-            const res = await fetch(fileUrl);
-            const blob = await res.blob();
+            let blob = null;
+            if (item.storage_path) {
+              blob = await decryptAndFetchFileBlob(item.storage_path);
+            } else if (fileUrl) {
+              const res = await fetch(fileUrl);
+              blob = await res.blob();
+            }
+
+            if (!blob) return;
+
             let fileNameStr = item.file_name || `file_${index + 1}`;
 
             if (usedNames.has(fileNameStr)) {
@@ -980,9 +1072,9 @@ async function downloadFilesConcurrently(itemsToDownload) {
   for (let i = 0; i < itemsToDownload.length; i++) {
     const item = itemsToDownload[i];
     const fileUrl = getFilePublicUrl(item.storage_path) || item.content;
-    if (fileUrl) {
+    if (fileUrl || item.storage_path) {
       markItemAsAccessed(item.id);
-      await downloadFileDirectly(fileUrl, item.file_name || 'download');
+      await downloadFileDirectly(fileUrl, item.file_name || 'download', item.storage_path);
       if (i < itemsToDownload.length - 1) {
         await new Promise(r => setTimeout(r, 150));
       }
@@ -990,12 +1082,18 @@ async function downloadFilesConcurrently(itemsToDownload) {
   }
 }
 
-// Direct file download preserving original file names
-async function downloadFileDirectly(url, fileName) {
+// Direct file download preserving original file names with client-side decryption
+async function downloadFileDirectly(url, fileName, storagePath = null) {
   try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
+    let blob = null;
+    if (storagePath) {
+      blob = await decryptAndFetchFileBlob(storagePath);
+    } else if (url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      blob = await res.blob();
+    }
+    if (!blob) throw new Error('No file data available');
     const blobUrl = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
@@ -1010,11 +1108,15 @@ async function downloadFileDirectly(url, fileName) {
     showToast('💾 ดาวน์โหลดไฟล์สำเร็จ!');
   } catch (err) {
     console.error('Direct download fallback:', err);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.target = '_blank';
-    a.click();
+    if (url) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.target = '_blank';
+      a.click();
+    } else {
+      showToast('❌ ดาวน์โหลดไฟล์ไม่สำเร็จ');
+    }
   }
 }
 
@@ -1023,6 +1125,11 @@ let isRefreshingFeed = false;
 let pendingRefreshRequest = false;
 
 async function refreshAppFeed() {
+  if (!isDeviceAuthorized()) {
+    updateVaultUIState(false);
+    return;
+  }
+
   const { url, key } = getSupabaseConfig();
   if (!url || !key) {
     if (liveFeedContainer) {
@@ -1144,10 +1251,10 @@ function renderCloudItemBubbles(sharesList) {
 
     // 1. Left Square Thumbnail
     let squareThumbHtml = '';
-    if (isImage && fileUrl) {
+    if (isImage && (item.storage_path || fileUrl)) {
       squareThumbHtml = `
         <div class="cloud-item-square-thumb" title="Click for large preview">
-          <img src="${fileUrl}" alt="preview" class="cloud-thumb-img" loading="lazy" />
+          <img src="" data-thumb-path="${escapeHtml(item.storage_path || '')}" data-raw-url="${escapeHtml(fileUrl || '')}" alt="preview" class="cloud-thumb-img cloud-thumb-lazy" />
         </div>
       `;
     } else {
@@ -1278,9 +1385,9 @@ function renderCloudItemBubbles(sharesList) {
       quickSaveBtn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (fileUrl) {
+        if (fileUrl || item.storage_path) {
           markItemAsAccessed(item.id);
-          downloadFileDirectly(fileUrl, item.file_name || 'download');
+          downloadFileDirectly(fileUrl, item.file_name || 'download', item.storage_path);
         }
       });
     }
@@ -1291,6 +1398,7 @@ function renderCloudItemBubbles(sharesList) {
       quickDeleteBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+          revokeBlobUrlForPath(item.storage_path);
           const res = await deleteShareRecordAndStorage(item.id, item.storage_path);
           if (res.success) {
             showToast('🗑️ Deleted!');
@@ -1300,6 +1408,24 @@ function renderCloudItemBubbles(sharesList) {
           await refreshAppFeed();
         }
       });
+    }
+
+    // Resolve lazy thumbnail image if present
+    const thumbImg = cardEl.querySelector('.cloud-thumb-lazy');
+    if (thumbImg) {
+      const storagePath = thumbImg.dataset.thumbPath;
+      const rawUrl = thumbImg.dataset.rawUrl;
+      if (storagePath) {
+        getImageBlobUrl(storagePath).then(blobUrl => {
+          if (blobUrl) {
+            thumbImg.src = blobUrl;
+          } else if (rawUrl) {
+            thumbImg.src = rawUrl;
+          }
+        });
+      } else if (rawUrl) {
+        thumbImg.src = rawUrl;
+      }
     }
 
     liveFeedContainer.appendChild(cardEl);
@@ -1325,9 +1451,9 @@ function initItemModal() {
     e.preventDefault();
     if (currentActiveItem) {
       const fileUrl = getFilePublicUrl(currentActiveItem.storage_path) || currentActiveItem.content;
-      if (fileUrl) {
+      if (fileUrl || currentActiveItem.storage_path) {
         markItemAsAccessed(currentActiveItem.id);
-        downloadFileDirectly(fileUrl, currentActiveItem.file_name || 'download');
+        downloadFileDirectly(fileUrl, currentActiveItem.file_name || 'download', currentActiveItem.storage_path);
       }
     }
   });
@@ -1341,6 +1467,7 @@ function initItemModal() {
 
   modalDeleteBtn.addEventListener('click', async () => {
     if (currentActiveItem && confirm('คุณต้องการลบรายการนี้ใช่หรือไม่?')) {
+      revokeBlobUrlForPath(currentActiveItem.storage_path);
       const res = await deleteShareRecordAndStorage(currentActiveItem.id, currentActiveItem.storage_path);
       if (res.success) {
         showToast('🗑️ Deleted!');
@@ -1373,8 +1500,19 @@ function openItemPreviewModal(item) {
   const isUrl = item.content && /^https?:\/\/[^\s]+$/i.test(item.content.trim());
 
   // Image Preview inside Modal
-  if (isImage && fileUrl) {
-    modalPreviewArea.innerHTML = `<img src="${fileUrl}" alt="preview" class="modal-img-preview" />`;
+  if (isImage && (item.storage_path || fileUrl)) {
+    modalPreviewArea.innerHTML = `<div style="padding: 24px; font-size: 0.85rem; color: #9ca3af; text-align: center;">⏳ กำลังถอดรหัสรูปภาพ...</div>`;
+    if (item.storage_path) {
+      getImageBlobUrl(item.storage_path).then(blobUrl => {
+        if (blobUrl) {
+          modalPreviewArea.innerHTML = `<img src="${blobUrl}" alt="preview" class="modal-img-preview" />`;
+        } else if (fileUrl) {
+          modalPreviewArea.innerHTML = `<img src="${fileUrl}" alt="preview" class="modal-img-preview" />`;
+        }
+      });
+    } else {
+      modalPreviewArea.innerHTML = `<img src="${fileUrl}" alt="preview" class="modal-img-preview" />`;
+    }
   } else if (isFile) {
     const fileNameStr = item.file_name || 'File';
     const fileSizeStr = item.file_size ? formatBytes(item.file_size) : '';
@@ -1397,7 +1535,7 @@ function openItemPreviewModal(item) {
     }
   }
 
-  if (isFile && fileUrl) {
+  if (isFile && (fileUrl || item.storage_path)) {
     modalDownloadBtn.classList.remove('hidden');
   }
 
@@ -1533,6 +1671,18 @@ function openSettingsModal() {
   const { url, key } = getSupabaseConfig();
   if (cfgUrl) cfgUrl.value = url;
   if (cfgKey) cfgKey.value = key;
+  if (settingsDeviceStatusPill) {
+    if (isDeviceAuthorized()) {
+      settingsDeviceStatusPill.textContent = '✅ Trusted Device';
+      settingsDeviceStatusPill.className = 'e2ee-status-pill protected';
+    } else {
+      settingsDeviceStatusPill.textContent = '🔒 Not Authorized';
+      settingsDeviceStatusPill.className = 'e2ee-status-pill warning';
+    }
+  }
+  if (settingsKeyFingerprint) {
+    settingsKeyFingerprint.textContent = isDeviceAuthorized() ? (getKeyFingerprint() || '----') : '----';
+  }
   if (configModal) configModal.classList.remove('hidden');
 }
 
@@ -1553,7 +1703,10 @@ function initPWA() {
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPwaPrompt = e;
-    if (pwaInstallBtn) pwaInstallBtn.classList.remove('hidden');
+    // Only show install button if device is authorized!
+    if (pwaInstallBtn && isDeviceAuthorized()) {
+      pwaInstallBtn.classList.remove('hidden');
+    }
   });
 
   if (pwaInstallBtn) {
@@ -1568,4 +1721,256 @@ function initPWA() {
       }
     });
   }
+}
+
+// --- Device Gatekeeper & Vault Security UI ---
+function updateVaultUIState(isAuthorized) {
+  if (isAuthorized) {
+    if (vaultGatekeeper) vaultGatekeeper.classList.add('hidden');
+    if (appMainContent) appMainContent.classList.remove('hidden');
+    if (headerVaultBadge) {
+      headerVaultBadge.classList.remove('vault-locked');
+      headerVaultBadge.classList.add('vault-unlocked');
+    }
+    if (vaultBadgeText) vaultBadgeText.textContent = 'Vault Active';
+    if (settingsDeviceStatusPill) {
+      settingsDeviceStatusPill.textContent = '✅ Trusted Device';
+      settingsDeviceStatusPill.className = 'e2ee-status-pill protected';
+    }
+    if (settingsKeyFingerprint) {
+      settingsKeyFingerprint.textContent = getKeyFingerprint() || '----';
+    }
+    if (pwaInstallBtn && deferredPwaPrompt) {
+      pwaInstallBtn.classList.remove('hidden');
+    }
+  } else {
+    if (vaultGatekeeper) vaultGatekeeper.classList.remove('hidden');
+    if (appMainContent) appMainContent.classList.add('hidden');
+    if (headerVaultBadge) {
+      headerVaultBadge.classList.remove('vault-unlocked');
+      headerVaultBadge.classList.add('vault-locked');
+    }
+    if (vaultBadgeText) vaultBadgeText.textContent = 'Vault Locked';
+    if (settingsDeviceStatusPill) {
+      settingsDeviceStatusPill.textContent = '🔒 Not Authorized';
+      settingsDeviceStatusPill.className = 'e2ee-status-pill warning';
+    }
+    if (settingsKeyFingerprint) {
+      settingsKeyFingerprint.textContent = '----';
+    }
+    if (pwaInstallBtn) {
+      pwaInstallBtn.classList.add('hidden');
+    }
+  }
+}
+
+let gatekeeperInitialized = false;
+
+async function initDeviceGatekeeper() {
+  // 1. Initialize encryption key & check pairing params in URL
+  const initRes = await initializeEncryptionKey();
+  const authorized = isDeviceAuthorized();
+  updateVaultUIState(authorized);
+
+  if (initRes && initRes.paired) {
+    showToast('📱 จับคู่อุปกรณ์สำเร็จ! ปลดล็อคห้องนิรภัยแล้ว 🐰💖');
+  }
+
+  // Hook header vault badge click
+  if (headerVaultBadge) {
+    headerVaultBadge.addEventListener('click', () => {
+      if (isDeviceAuthorized()) {
+        openSettingsModal();
+      } else {
+        if (gatekeeperPassInput) gatekeeperPassInput.focus();
+      }
+    });
+  }
+
+  if (gatekeeperInitialized) return;
+  gatekeeperInitialized = true;
+
+  // Toggle Password visibility
+  if (gatekeeperTogglePwdBtn && gatekeeperPassInput) {
+    gatekeeperTogglePwdBtn.addEventListener('click', () => {
+      const isPwd = gatekeeperPassInput.type === 'password';
+      gatekeeperPassInput.type = isPwd ? 'text' : 'password';
+      gatekeeperTogglePwdBtn.textContent = isPwd ? '🙈' : '👁️';
+    });
+  }
+
+  // Toggle Pairing input box
+  if (gatekeeperOpenPairBtn && gatekeeperPairBox) {
+    gatekeeperOpenPairBtn.addEventListener('click', () => {
+      gatekeeperPairBox.classList.toggle('hidden');
+      if (!gatekeeperPairBox.classList.contains('hidden') && gatekeeperPairInput) {
+        gatekeeperPairInput.focus();
+      }
+    });
+  }
+
+  // Apply Pairing Token / Link
+  if (gatekeeperApplyTokenBtn && gatekeeperPairInput) {
+    gatekeeperApplyTokenBtn.addEventListener('click', async () => {
+      const token = gatekeeperPairInput.value.trim();
+      if (!token) {
+        showToast('⚠️ กรุณากรอก Pairing Token หรือ ลิงก์จับคู่');
+        return;
+      }
+      try {
+        await unlockWithPairingToken(token);
+        updateVaultUIState(true);
+        showToast('📱 เชื่อมต่อและลงทะเบียนเครื่องสำเร็จ! 🐰💖');
+        await refreshAppFeed();
+      } catch (err) {
+        console.error('Pairing error:', err);
+        showToast('❌ Token ไม่ถูกต้องหรือไม่สามารถถอดรหัสได้');
+        if (vaultGatekeeper) {
+          vaultGatekeeper.classList.add('shake');
+          setTimeout(() => vaultGatekeeper.classList.remove('shake'), 600);
+        }
+      }
+    });
+  }
+
+  // Submit Passphrase
+  if (gatekeeperUnlockForm && gatekeeperPassInput) {
+    gatekeeperUnlockForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const passphrase = gatekeeperPassInput.value.trim();
+      if (!passphrase) return;
+
+      if (gatekeeperSubmitBtn) {
+        gatekeeperSubmitBtn.disabled = true;
+        gatekeeperSubmitBtn.innerHTML = '<span>กำลังตรวจสอบรหัส... ⏳</span>';
+      }
+
+      try {
+        const verifyRes = await verifyPassphraseAgainstVault(passphrase);
+        if (verifyRes.valid) {
+          await unlockWithPassphrase(passphrase);
+          if (verifyRes.isFirstTime) {
+            await setupVaultChallenge(getActiveCryptoKey());
+          }
+          if (gatekeeperErrorMsg) gatekeeperErrorMsg.classList.add('hidden');
+          gatekeeperPassInput.value = '';
+          updateVaultUIState(true);
+          showToast('🔓 ปลดล็อค & ยืนยันเครื่องสำเร็จเรียบร้อย! 🐰✨');
+          await refreshAppFeed();
+        } else {
+          if (gatekeeperErrorMsg) gatekeeperErrorMsg.classList.remove('hidden');
+          if (vaultGatekeeper) {
+            vaultGatekeeper.classList.add('shake');
+            setTimeout(() => vaultGatekeeper.classList.remove('shake'), 600);
+          }
+          gatekeeperPassInput.focus();
+          gatekeeperPassInput.select();
+        }
+      } catch (err) {
+        console.error('Unlock error:', err);
+        showToast(`❌ เกิดข้อผิดพลาด: ${err.message}`);
+      } finally {
+        if (gatekeeperSubmitBtn) {
+          gatekeeperSubmitBtn.disabled = false;
+          gatekeeperSubmitBtn.innerHTML = '<span>ปลดล็อค & ลงทะเบียนเครื่องนี้ 🐰✨</span>';
+        }
+      }
+    });
+  }
+}
+
+// --- Device Pairing in Settings Modal ---
+let currentPairingUrl = null;
+
+function initDevicePairingSettings() {
+  if (settingsPairDeviceBtn) {
+    settingsPairDeviceBtn.addEventListener('click', async () => {
+      if (!isDeviceAuthorized()) {
+        showToast('⚠️ กรุณาปลดล็อคเครื่องนี้ก่อนจับคู่อุปกรณ์อื่น');
+        return;
+      }
+      try {
+        const pairUrl = await getPairingUrl();
+        if (!pairUrl) {
+          showToast('❌ ไม่พบคีย์เข้ารหัส กรุณาปลดล็อคใหม่อีกครั้ง');
+          return;
+        }
+        currentPairingUrl = pairUrl;
+        openPairDeviceModal(pairUrl);
+      } catch (err) {
+        console.error('Failed to generate pairing url:', err);
+        showToast('❌ ไม่สามารถสร้างรหัสจับคู่ได้');
+      }
+    });
+  }
+
+  if (settingsRevokeDeviceBtn) {
+    settingsRevokeDeviceBtn.addEventListener('click', () => {
+      if (confirm('คุณแน่ใจหรือไม่ว่าต้องการยกเลิกการอนุญาตเครื่องนี้? หลังจากนี้เครื่องนี้จะไม่สามารถดูหรือดาวน์โหลดไฟล์ใน Vault ได้')) {
+        revokeDeviceAuthorization();
+        closeModalBtnHandler();
+        updateVaultUIState(false);
+        if (liveFeedContainer) liveFeedContainer.innerHTML = '';
+        showToast('🔒 ยกเลิกการอนุญาตเครื่องนี้แล้ว');
+      }
+    });
+  }
+
+  if (closePairModalBtn) {
+    closePairModalBtn.addEventListener('click', closePairDeviceModal);
+  }
+
+  if (pairDeviceModal) {
+    pairDeviceModal.addEventListener('click', (e) => {
+      if (e.target === pairDeviceModal) closePairDeviceModal();
+    });
+  }
+
+  if (copyPairLinkBtn) {
+    copyPairLinkBtn.addEventListener('click', async () => {
+      if (currentPairingUrl) {
+        await copyToClipboard(currentPairingUrl, '📋 คัดลอก Pairing Link เรียบร้อย!');
+      }
+    });
+  }
+}
+
+function openPairDeviceModal(pairUrl) {
+  if (!pairDeviceModal || !pairModalCanvas) return;
+  QRCode.toCanvas(pairModalCanvas, pairUrl, {
+    width: 220,
+    margin: 2,
+    errorCorrectionLevel: 'H',
+    color: {
+      dark: '#ec4899',
+      light: '#ffffff'
+    }
+  }, (err) => {
+    if (err) {
+      console.error('QR code error for pairing:', err);
+      return;
+    }
+    const ctx = pairModalCanvas.getContext('2d');
+    const logo = new Image();
+    logo.src = '/bunny_mascot.png';
+    logo.onload = () => {
+      const logoSize = pairModalCanvas.width * 0.24;
+      const center = (pairModalCanvas.width - logoSize) / 2;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(pairModalCanvas.width / 2, pairModalCanvas.height / 2, logoSize / 2 + 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.drawImage(logo, center, center, logoSize, logoSize);
+    };
+    logo.onerror = () => {
+      console.warn('Bunny mascot logo could not be loaded for QR overlay');
+    };
+  });
+
+  pairDeviceModal.classList.remove('hidden');
+}
+
+function closePairDeviceModal() {
+  if (pairDeviceModal) pairDeviceModal.classList.add('hidden');
+  currentPairingUrl = null;
 }

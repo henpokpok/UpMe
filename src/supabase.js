@@ -1,4 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
+import {
+  getActiveCryptoKey,
+  encryptText,
+  decryptText,
+  encryptObject,
+  decryptObject,
+  encryptBinary,
+  decryptBinary,
+  isEncryptedPayload,
+  isEncryptedBinary,
+  deriveKeyFromPassphrase
+} from './crypto.js';
 
 const STORAGE_URL_KEY = 'upme_supabase_url';
 const STORAGE_ANON_KEY = 'upme_supabase_anon_key';
@@ -71,6 +83,124 @@ export function getFilePublicUrl(storagePath) {
 }
 
 /**
+ * Get or create a persistent device identifier for ownership & delete control
+ */
+export function getOrCreateDeviceId() {
+  if (typeof localStorage === 'undefined') return 'server_device';
+  let deviceId = localStorage.getItem('upmee_device_id');
+  if (!deviceId) {
+    deviceId = 'dev_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+    localStorage.setItem('upmee_device_id', deviceId);
+  }
+  return deviceId;
+}
+
+/**
+ * Fetch the persistent encrypted challenge from Supabase to verify master passphrase
+ */
+export async function getVaultChallenge() {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('shares')
+      .select('content')
+      .eq('code', 'VAULT_GATE_V1')
+      .maybeSingle();
+    if (error || !data) return null;
+    return data.content;
+  } catch (err) {
+    console.warn('Error fetching vault challenge:', err);
+    return null;
+  }
+}
+
+/**
+ * Setup or update the encrypted challenge in Supabase using the master CryptoKey
+ */
+export async function setupVaultChallenge(cryptoKey) {
+  const supabase = getSupabaseClient();
+  if (!supabase || !cryptoKey) return false;
+  try {
+    const challengeSecret = 'UPMEE_VAULT_ACTIVE_SECRET';
+    const encryptedSecret = await encryptText(challengeSecret, cryptoKey);
+    
+    // Check if challenge already exists
+    const existing = await getVaultChallenge();
+    if (existing) {
+      const { error } = await supabase
+        .from('shares')
+        .update({ content: encryptedSecret })
+        .eq('code', 'VAULT_GATE_V1');
+      return !error;
+    } else {
+      const { error } = await supabase
+        .from('shares')
+        .insert([
+          {
+            code: 'VAULT_GATE_V1',
+            type: 'text',
+            content: encryptedSecret,
+            storage_path: null,
+            file_name: 'vault_system_challenge',
+            file_size: 0,
+            one_time_download: false,
+            expires_at: '2099-12-31T23:59:59Z'
+          }
+        ]);
+      return !error;
+    }
+  } catch (err) {
+    console.warn('Error setting up vault challenge:', err);
+    return false;
+  }
+}
+
+/**
+ * Verify if an entered passphrase is valid against the vault challenge in Supabase
+ */
+export async function verifyPassphraseAgainstVault(passphrase) {
+  const challenge = await getVaultChallenge();
+  if (!challenge) {
+    // If no challenge in DB yet, this is the first initialization of the vault
+    return { isFirstTime: true, valid: true };
+  }
+  try {
+    const testKey = await deriveKeyFromPassphrase(passphrase.trim());
+    const decrypted = await decryptText(challenge, testKey);
+    if (decrypted === 'UPMEE_VAULT_ACTIVE_SECRET') {
+      return { isFirstTime: false, valid: true, key: testKey };
+    }
+    return { isFirstTime: false, valid: false };
+  } catch {
+    return { isFirstTime: false, valid: false };
+  }
+}
+
+/**
+ * Download and decrypt an encrypted file from Supabase Storage, returning a decrypted Blob
+ */
+export async function decryptAndFetchFileBlob(storagePath) {
+  const publicUrl = getFilePublicUrl(storagePath);
+  if (!publicUrl) throw new Error('File URL not found');
+  
+  const res = await fetch(publicUrl);
+  if (!res.ok) throw new Error(`Failed to fetch file: HTTP ${res.status}`);
+  const arrayBuffer = await res.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
+
+  const cryptoKey = getActiveCryptoKey();
+  if (isEncryptedBinary(uint8)) {
+    if (!cryptoKey) throw new Error('Master encryption key required to decrypt this file');
+    const decryptedBuffer = await decryptBinary(uint8, cryptoKey);
+    return new Blob([decryptedBuffer]);
+  }
+
+  // Not encrypted (legacy file)
+  return new Blob([uint8]);
+}
+
+/**
  * Save device push subscription token for background Web Push notifications
  */
 export async function savePushSubscription(subscription) {
@@ -127,6 +257,19 @@ export async function createMultipleShareItems({ textContent, files = [], durati
       throw new Error('กรุณาระบุข้อความหรือเลือกไฟล์อย่างน้อย 1 อย่าง');
     }
     const passcode = generatePasscode();
+    const cryptoKey = getActiveCryptoKey();
+    let finalContent = textContent;
+
+    if (cryptoKey) {
+      const metadata = {
+        text: textContent,
+        fileName: null,
+        mimeType: 'text/plain',
+        fileSize: 0,
+        ownerDevice: getOrCreateDeviceId()
+      };
+      finalContent = await encryptObject(metadata, cryptoKey);
+    }
 
     const { data, error: dbError } = await supabase
       .from('shares')
@@ -134,7 +277,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
         {
           code: passcode,
           type: 'text',
-          content: textContent,
+          content: finalContent,
           storage_path: null,
           file_name: null,
           file_size: null,
@@ -162,6 +305,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
   const errors = [];
   const totalCount = files.length;
   let completedCount = 0;
+  const cryptoKey = getActiveCryptoKey();
 
   // Process files with concurrency limit of 3
   const CONCURRENCY_LIMIT = 3;
@@ -173,15 +317,43 @@ export async function createMultipleShareItems({ textContent, files = [], durati
       const file = files[index];
       const timestamp = Date.now();
       const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const storagePath = `uploads/${timestamp}_${index}_${sanitizedFileName}`;
+      const storagePath = cryptoKey 
+        ? `uploads/${timestamp}_${index}_vault.bin`
+        : `uploads/${timestamp}_${index}_${sanitizedFileName}`;
       const passcode = generatePasscode();
 
       try {
+        let uploadPayload = file;
+        let finalContent = '';
+        let insertFileName = file.name;
+        let insertFileSize = file.size;
+
+        if (cryptoKey) {
+          const fileBuffer = await file.arrayBuffer();
+          const encryptedBytes = await encryptBinary(fileBuffer, cryptoKey);
+          uploadPayload = encryptedBytes;
+          insertFileSize = encryptedBytes.byteLength;
+          insertFileName = 'Encrypted File';
+
+          const metadata = {
+            text: textContent || null,
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            fileSize: file.size,
+            ownerDevice: getOrCreateDeviceId()
+          };
+          finalContent = await encryptObject(metadata, cryptoKey);
+        }
+
         // 1. Upload File to Supabase Storage
         const { error: uploadError } = await supabase
           .storage
           .from('user-shares')
-          .upload(storagePath, file, { cacheControl: '3600', upsert: false });
+          .upload(storagePath, uploadPayload, { 
+            cacheControl: '3600', 
+            upsert: false,
+            contentType: cryptoKey ? 'application/octet-stream' : (file.type || 'application/octet-stream')
+          });
 
         if (uploadError) {
           throw new Error(`อัปโหลด "${file.name}" ไม่สำเร็จ: ${uploadError.message}`);
@@ -194,7 +366,9 @@ export async function createMultipleShareItems({ textContent, files = [], durati
 
         const publicUrl = publicUrlData ? publicUrlData.publicUrl : '';
         const fileType = textContent ? 'both' : 'file';
-        const finalContent = textContent ? textContent : (publicUrl || '');
+        if (!cryptoKey) {
+          finalContent = textContent ? textContent : (publicUrl || '');
+        }
 
         // 2. Insert record into database
         let { data, error: dbError } = await supabase
@@ -205,8 +379,8 @@ export async function createMultipleShareItems({ textContent, files = [], durati
               type: fileType,
               content: finalContent,
               storage_path: storagePath,
-              file_name: file.name,
-              file_size: file.size,
+              file_name: insertFileName,
+              file_size: insertFileSize,
               one_time_download: false,
               expires_at: expiresAt
             }
@@ -224,8 +398,8 @@ export async function createMultipleShareItems({ textContent, files = [], durati
                 type: 'file',
                 content: finalContent,
                 storage_path: storagePath,
-                file_name: file.name,
-                file_size: file.size,
+                file_name: insertFileName,
+                file_size: insertFileSize,
                 one_time_download: false,
                 expires_at: expiresAt
               }
@@ -272,7 +446,7 @@ export async function createMultipleShareItems({ textContent, files = [], durati
 }
 
 /**
- * Fetch all active non-expired shares
+ * Fetch all active non-expired shares and decrypt them if key is active
  */
 export async function getActiveSharesList() {
   try {
@@ -283,6 +457,7 @@ export async function getActiveSharesList() {
       .from('shares')
       .select('*')
       .gt('expires_at', new Date().toISOString())
+      .neq('code', 'VAULT_GATE_V1')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -290,7 +465,51 @@ export async function getActiveSharesList() {
       return [];
     }
 
-    return data || [];
+    if (!data || data.length === 0) return [];
+
+    const cryptoKey = getActiveCryptoKey();
+    const decryptedShares = await Promise.all(data.map(async (item) => {
+      if (isEncryptedPayload(item.content)) {
+        if (cryptoKey) {
+          try {
+            const meta = await decryptObject(item.content, cryptoKey);
+            return {
+              ...item,
+              _isEncrypted: true,
+              _isLocked: false,
+              file_name: meta.fileName || (item.storage_path ? item.file_name : null),
+              file_size: meta.fileSize !== undefined ? meta.fileSize : item.file_size,
+              mimeType: meta.mimeType || null,
+              content: meta.text || (item.storage_path ? '' : item.content),
+              ownerDevice: meta.ownerDevice || null
+            };
+          } catch {
+            return {
+              ...item,
+              _isEncrypted: true,
+              _isLocked: true,
+              file_name: '🔒 Encrypted File',
+              content: '🔒 Encrypted Content'
+            };
+          }
+        } else {
+          return {
+            ...item,
+            _isEncrypted: true,
+            _isLocked: true,
+            file_name: '🔒 Encrypted File',
+            content: '🔒 Encrypted Content'
+          };
+        }
+      }
+      return {
+        ...item,
+        _isEncrypted: false,
+        _isLocked: false
+      };
+    }));
+
+    return decryptedShares;
   } catch (err) {
     console.error('Exception in getActiveSharesList:', err);
     return [];

@@ -35,6 +35,10 @@
       <div class="logo-area">
         <img src="/bunny_mascot.png" alt="UpMee Bunny Mascot" class="bunny-logo-img" />
         <span class="logo-text">UpMee</span>
+        <div id="header-vault-badge" class="e2ee-header-badge locked" title="Device Authorization Status">
+          <span class="status-dot"></span>
+          <span id="vault-badge-text">Vault Locked</span>
+        </div>
       </div>
 
       <div class="header-actions">
@@ -85,9 +89,63 @@
         <div class="loading-spinner-box"><p>Loading history...</p></div>
       </div>
     </div>
+    
+    <!-- Gatekeeper Lock Screen (Displayed when device is not authorized) -->
+    <section id="vault-gatekeeper" class="gatekeeper-card hidden">
+      <div class="gatekeeper-header">
+        <div class="gatekeeper-icon-box">
+          <img src="/bunny_mascot.png" alt="Bunny Guard" class="gatekeeper-bunny-img" />
+          <span class="gatekeeper-lock-badge">🔒</span>
+        </div>
+        <h2 class="gatekeeper-title">UpMee Private Vault</h2>
+        <p class="gatekeeper-desc">พื้นที่แชร์ไฟล์ส่วนตัว เฉพาะเครื่องที่ได้รับอนุญาตเท่านั้น</p>
+        <div class="gatekeeper-status-pill">
+          <span class="status-dot-amber"></span>
+          <span id="gatekeeper-pill-text">เครื่องนี้ยังไม่ได้รับการลงทะเบียน (Locked)</span>
+        </div>
+      </div>
 
-    <!-- Storage Bar (% Only) -->
-    <div class="storage-bar-card">
+      <form id="gatekeeper-unlock-form" class="gatekeeper-form">
+        <div class="form-group">
+          <label for="gatekeeper-passphrase-input">Master Passphrase (รหัสผ่านหลัก)</label>
+          <div class="input-with-eye">
+            <input type="password" id="gatekeeper-passphrase-input" placeholder="ใส่รหัสผ่านลับของคุณ..." autocomplete="current-password" required />
+            <button type="button" id="gatekeeper-toggle-pwd-btn" class="pwd-toggle-btn" title="Show/Hide Password">👁️</button>
+          </div>
+          <p id="gatekeeper-error-msg" class="gatekeeper-error-text hidden">❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง</p>
+        </div>
+
+        <button type="submit" id="gatekeeper-submit-btn" class="primary-btn gatekeeper-unlock-btn">
+          <span>ปลดล็อค & ลงทะเบียนเครื่องนี้ 🐰✨</span>
+        </button>
+      </form>
+
+      <div class="gatekeeper-divider">
+        <span>หรือจับคู่กับเครื่องหลัก</span>
+      </div>
+
+      <div class="gatekeeper-pair-section">
+        <button type="button" id="gatekeeper-open-pair-input-btn" class="secondary-btn" style="width: 100%;">
+          🔗 ใส่ Pairing Token / URL จากเครื่องหลัก
+        </button>
+        <div id="gatekeeper-pair-input-box" class="gatekeeper-pair-box hidden">
+          <input type="text" id="gatekeeper-pair-token-input" placeholder="วางลิงก์จับคู่ (Pairing Link) ที่นี่..." />
+          <button type="button" id="gatekeeper-apply-token-btn" class="primary-btn sm-btn">ยืนยัน</button>
+        </div>
+      </div>
+
+      <div class="gatekeeper-security-footer">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span>Zero-Knowledge AES-GCM 256-bit Encryption</span>
+      </div>
+    </section>
+
+    <!-- App Main Content Container (Visible only when device is verified) -->
+    <div id="app-main-content">
+      <!-- Storage Bar (% Only) -->
+      <div class="storage-bar-card">
       <div class="storage-bar-info">
         <span class="storage-bar-title">Storage</span>
         <span id="storage-usage-text" class="storage-usage-text">0%</span>
@@ -283,17 +341,38 @@
       </section>
 
     </main>
+    </div><!-- End #app-main-content -->
 
-    <!-- Supabase Config & E2EE Settings Modal -->
+    <!-- Supabase Config & Device Authorization Settings Modal -->
     <div id="config-modal" class="modal-backdrop hidden">
       <div class="modal-card">
         <div class="modal-header">
-          <h3>Settings</h3>
+          <h3>Settings & Security</h3>
           <button id="close-modal-btn" class="close-btn">&times;</button>
         </div>
         <div class="modal-body">
-          <!-- Supabase Connection Section -->
+          <!-- Device Authorization & Pairing Section -->
           <div class="settings-section">
+            <h4 class="settings-section-title">📱 Device Authorization & Pairing</h4>
+            <div class="e2ee-key-status-box">
+              <div class="e2ee-status-row">
+                <span id="settings-device-status-pill" class="e2ee-status-pill protected">✅ Trusted Device</span>
+                <span id="settings-key-fingerprint" class="key-fingerprint-pill">----</span>
+              </div>
+              <p class="e2ee-hint-text">เครื่องนี้ได้รับอนุญาตให้ดูและถอดรหัสไฟล์ใน Private Vault เรียบร้อยแล้ว</p>
+            </div>
+            <div class="e2ee-actions-grid">
+              <button type="button" id="settings-pair-device-btn" class="e2ee-action-btn">
+                <span>🔗 Pair New Device</span>
+              </button>
+              <button type="button" id="settings-revoke-device-btn" class="e2ee-action-btn danger">
+                <span>🔒 Revoke Access</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Supabase Connection Section -->
+          <div class="settings-section" style="margin-top: 14px; border-top: 1px dashed var(--card-border); padding-top: 12px;">
             <h4 class="settings-section-title">☁️ Supabase Connection</h4>
             <div class="form-group">
               <label for="cfg-url">Supabase Project URL</label>
@@ -307,6 +386,25 @@
         </div>
         <div class="modal-footer">
           <button id="save-config-btn" class="primary-btn">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Device Pairing QR Modal -->
+    <div id="pair-device-modal" class="modal-backdrop hidden">
+      <div class="modal-card text-center" style="align-items: center; max-width: 380px;">
+        <div class="modal-header" style="width: 100%;">
+          <h3>🔗 Pair New Device</h3>
+          <button id="close-pair-modal-btn" class="close-btn">&times;</button>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px 0; width: 100%;">
+          <p style="font-size: var(--font-xs); color: var(--text-secondary); text-align: center; margin: 0 8px;">
+            สแกน QR Code นี้จากมือถือหรือแท็บเล็ตเครื่องใหม่ เพื่อลงทะเบียนและปลดล็อคเครื่องทันที 🐰📱
+          </p>
+          <canvas id="pair-modal-canvas" style="border-radius: 16px; box-shadow: 0 4px 16px rgba(236,72,153,0.15);"></canvas>
+          <button type="button" id="copy-pair-link-btn" class="secondary-btn" style="width: 100%; padding: 8px 12px;">
+            📋 คัดลอก Pairing Link
+          </button>
         </div>
       </div>
     </div>
