@@ -210,6 +210,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPWA();
   
   await initDeviceGatekeeper();
+  if (isDeviceAuthorized()) {
+    refreshAppFeed();
+  }
   initRealtimeSubscription();
   checkSharedDataFromGallery();
 
@@ -858,8 +861,8 @@ function initForms() {
   });
 
   if (refreshFeedBtn) {
-    refreshFeedBtn.addEventListener('click', () => {
-      refreshAppFeed();
+    refreshFeedBtn.addEventListener('click', async () => {
+      await refreshAppFeed();
       showToast('🔄 Refreshed');
     });
   }
@@ -1170,6 +1173,9 @@ async function refreshAppFeed() {
   }
 
   isRefreshingFeed = true;
+  if (refreshFeedBtn) {
+    refreshFeedBtn.classList.add('spinning');
+  }
 
   try {
     // 1. Fetch active shares list once
@@ -1239,6 +1245,9 @@ async function refreshAppFeed() {
     }
   } finally {
     isRefreshingFeed = false;
+    if (refreshFeedBtn) {
+      refreshFeedBtn.classList.remove('spinning');
+    }
     if (pendingRefreshRequest) {
       pendingRefreshRequest = false;
       refreshAppFeed();
@@ -1769,6 +1778,10 @@ async function initDeviceGatekeeper() {
   await initializeEncryptionKey();
   const authorized = isDeviceAuthorized();
   updateVaultUIState(authorized);
+
+  if (authorized) {
+    refreshAppFeed();
+  }
 
   if (gatekeeperInitialized) return;
   gatekeeperInitialized = true;
