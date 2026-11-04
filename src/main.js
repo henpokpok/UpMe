@@ -20,7 +20,8 @@ import {
   isDeviceAuthorized,
   unlockWithPassphrase,
   revokeDeviceAuthorization,
-  getActiveCryptoKey
+  getActiveCryptoKey,
+  base64ToBytes
 } from './crypto.js';
 
 // Local Storage Key for Accessed Items
@@ -93,7 +94,6 @@ let selectedShareIds = new Set();
 let currentSharesList = [];
 
 // DOM Elements
-const headerE2eeBadge = document.getElementById('header-e2ee-badge');
 const historyBtn = document.getElementById('history-btn');
 const historyPopover = document.getElementById('history-popover');
 const popoverNotifyToggle = document.getElementById('popover-notify-toggle');
@@ -170,15 +170,37 @@ const gatekeeperTogglePwdBtn = document.getElementById('gatekeeper-toggle-pwd-bt
 const gatekeeperSubmitBtn = document.getElementById('gatekeeper-submit-btn');
 const gatekeeperErrorMsg = document.getElementById('gatekeeper-error-msg');
 
-// In-Memory Decrypted Image Blob Cache
-const imageBlobUrlCache = new Map();
+// Bounded LRU Decrypted Image Blob Cache with Auto-Revocation
+const MAX_IMAGE_CACHE_ENTRIES = 30;
+const imageBlobUrlCache = new Map(); // storagePath -> { url, lastAccessed }
+
 async function getImageBlobUrl(storagePath) {
   if (!storagePath) return null;
-  if (imageBlobUrlCache.has(storagePath)) return imageBlobUrlCache.get(storagePath);
+  if (imageBlobUrlCache.has(storagePath)) {
+    const entry = imageBlobUrlCache.get(storagePath);
+    entry.lastAccessed = Date.now();
+    return entry.url;
+  }
   try {
     const blob = await decryptAndFetchFileBlob(storagePath);
     const blobUrl = URL.createObjectURL(blob);
-    imageBlobUrlCache.set(storagePath, blobUrl);
+
+    // Evict oldest if exceeding capacity
+    if (imageBlobUrlCache.size >= MAX_IMAGE_CACHE_ENTRIES) {
+      let oldestKey = null;
+      let oldestTime = Infinity;
+      for (const [k, v] of imageBlobUrlCache.entries()) {
+        if (v.lastAccessed < oldestTime) {
+          oldestTime = v.lastAccessed;
+          oldestKey = k;
+        }
+      }
+      if (oldestKey) {
+        revokeBlobUrlForPath(oldestKey);
+      }
+    }
+
+    imageBlobUrlCache.set(storagePath, { url: blobUrl, lastAccessed: Date.now() });
     return blobUrl;
   } catch (err) {
     console.warn('Could not decrypt image preview:', err);
@@ -187,14 +209,41 @@ async function getImageBlobUrl(storagePath) {
 }
 
 function revokeBlobUrlForPath(storagePath) {
-  if (!storagePath) return;
-  if (imageBlobUrlCache.has(storagePath)) {
-    const url = imageBlobUrlCache.get(storagePath);
-    try {
-      URL.revokeObjectURL(url);
-    } catch (_) {}
-    imageBlobUrlCache.delete(storagePath);
+  if (!storagePath || !imageBlobUrlCache.has(storagePath)) return;
+  const entry = imageBlobUrlCache.get(storagePath);
+  try {
+    URL.revokeObjectURL(entry.url || entry);
+  } catch (_) {}
+  imageBlobUrlCache.delete(storagePath);
+}
+
+// IntersectionObserver for Silky-Smooth Lazy Thumbnail Decryption
+let thumbnailObserver = null;
+function getThumbnailObserver() {
+  if (!thumbnailObserver && typeof IntersectionObserver !== 'undefined') {
+    thumbnailObserver = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const img = entry.target;
+          observer.unobserve(img);
+          const storagePath = img.dataset.thumbPath;
+          const rawUrl = img.dataset.rawUrl;
+          if (storagePath) {
+            getImageBlobUrl(storagePath).then(blobUrl => {
+              if (blobUrl) {
+                img.src = blobUrl;
+              } else if (rawUrl) {
+                img.src = rawUrl;
+              }
+            });
+          } else if (rawUrl) {
+            img.src = rawUrl;
+          }
+        }
+      });
+    }, { rootMargin: '200px 0px' });
   }
+  return thumbnailObserver;
 }
 
 // --- Initialization ---
@@ -209,10 +258,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initQrModal();
   initPWA();
   
+  // initDeviceGatekeeper will call refreshAppFeed() if authorized
   await initDeviceGatekeeper();
-  if (isDeviceAuthorized()) {
-    refreshAppFeed();
-  }
   initRealtimeSubscription();
   checkSharedDataFromGallery();
 
@@ -347,14 +394,7 @@ function calculateConfiguredHoursText(createdAtISO, expiresAtISO) {
 }
 
 function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
+  return base64ToBytes(base64String);
 }
 
 async function registerWebPushSubscription(silent = false) {
@@ -728,12 +768,22 @@ function removeFileFromQueue(index) {
   }
 }
 
+let queuedFileBlobUrls = [];
+function clearQueuedFileBlobUrls() {
+  queuedFileBlobUrls.forEach(url => {
+    try { URL.revokeObjectURL(url); } catch (_) {}
+  });
+  queuedFileBlobUrls = [];
+}
+
 function clearAllQueuedFiles() {
+  clearQueuedFileBlobUrls();
   selectedFiles = [];
   renderSelectedFilesQueue();
 }
 
 function renderSelectedFilesQueue() {
+  clearQueuedFileBlobUrls();
   if (!filePreview || !dropzoneEmptyContent || !selectedFilesList) return;
 
   if (selectedFiles.length === 0) {
@@ -767,6 +817,7 @@ function renderSelectedFilesQueue() {
 
     if (isImage) {
       const blobUrl = URL.createObjectURL(file);
+      queuedFileBlobUrls.push(blobUrl);
       thumbHtml = `<img src="${blobUrl}" alt="thumb" class="selected-file-thumb" />`;
     } else {
       let icon = '📄';
@@ -1132,12 +1183,15 @@ async function downloadFileDirectly(url, fileName, storagePath = null) {
     setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
     showToast('💾 ดาวน์โหลดไฟล์สำเร็จ!');
   } catch (err) {
-    console.error('Direct download fallback:', err);
-    if (url) {
+    console.error('Direct download error:', err);
+    if (storagePath) {
+      showToast(`❌ ไม่สามารถถอดรหัสไฟล์ได้: ${err.message}`);
+    } else if (url) {
       const a = document.createElement('a');
       a.href = url;
       a.download = fileName;
       a.target = '_blank';
+      a.rel = 'noopener noreferrer';
       a.click();
     } else {
       showToast('❌ ดาวน์โหลดไฟล์ไม่สำเร็จ');
@@ -1441,21 +1495,26 @@ function renderCloudItemBubbles(sharesList) {
       });
     }
 
-    // Resolve lazy thumbnail image if present
+    // Resolve lazy thumbnail image using IntersectionObserver
     const thumbImg = cardEl.querySelector('.cloud-thumb-lazy');
     if (thumbImg) {
-      const storagePath = thumbImg.dataset.thumbPath;
-      const rawUrl = thumbImg.dataset.rawUrl;
-      if (storagePath) {
-        getImageBlobUrl(storagePath).then(blobUrl => {
-          if (blobUrl) {
-            thumbImg.src = blobUrl;
-          } else if (rawUrl) {
-            thumbImg.src = rawUrl;
-          }
-        });
-      } else if (rawUrl) {
-        thumbImg.src = rawUrl;
+      const observer = getThumbnailObserver();
+      if (observer) {
+        observer.observe(thumbImg);
+      } else {
+        const storagePath = thumbImg.dataset.thumbPath;
+        const rawUrl = thumbImg.dataset.rawUrl;
+        if (storagePath) {
+          getImageBlobUrl(storagePath).then(blobUrl => {
+            if (blobUrl) {
+              thumbImg.src = blobUrl;
+            } else if (rawUrl) {
+              thumbImg.src = rawUrl;
+            }
+          });
+        } else if (rawUrl) {
+          thumbImg.src = rawUrl;
+        }
       }
     }
 
@@ -1561,7 +1620,7 @@ function openItemPreviewModal(item) {
     modalCopyBtn.classList.remove('hidden');
 
     if (isUrl) {
-      modalOpenLinkBtn.href = item.content;
+      modalOpenLinkBtn.href = item.content.trim();
       modalOpenLinkBtn.classList.remove('hidden');
     }
   }

@@ -215,3 +215,16 @@ test('Zero-Knowledge Challenge: Vault Challenge Verification Logic', async () =>
   );
 });
 
+test('E2EE Crypto: Base64 & URL-safe Base64 conversion helpers', async () => {
+  const { bytesToBase64, base64ToBytes } = await import('../src/crypto.js');
+  const sampleBytes = new Uint8Array([0, 15, 255, 128, 64, 32, 16, 8, 4, 2, 1]);
+  const b64 = bytesToBase64(sampleBytes);
+  const recovered = base64ToBytes(b64);
+  assert.deepStrictEqual(recovered, sampleBytes, 'Base64 roundtrip must match exactly');
+
+  // URL-safe characters (- and _) and space-normalization
+  const urlSafe = b64.replace(/\+/g, '-').replace(/\//g, '_');
+  const recoveredFromUrlSafe = base64ToBytes(urlSafe);
+  assert.deepStrictEqual(recoveredFromUrlSafe, sampleBytes, 'URL-safe base64 must decode properly');
+});
+

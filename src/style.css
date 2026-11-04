@@ -791,8 +791,10 @@ input:checked + .slider.sm:before {
   align-items: center;
   gap: 12px;
   box-shadow: 0 4px 14px rgba(244, 114, 182, 0.06), 0 1px 3px rgba(0, 0, 0, 0.02);
-  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, border-color 0.2s ease;
   user-select: none;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 98px;
 }
 
 .cloud-item-row-card.selected {
@@ -842,6 +844,12 @@ input:checked + .slider.sm:before {
   height: 100%;
   object-fit: cover;
   display: block;
+  opacity: 0;
+  transition: opacity 0.2s ease-in;
+}
+
+.cloud-thumb-img[src]:not([src=""]) {
+  opacity: 1;
 }
 
 .cloud-thumb-icon {

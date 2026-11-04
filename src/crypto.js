@@ -37,7 +37,7 @@ const IV_LENGTH = 12; // 12 bytes for AES-GCM
 const BINARY_MAGIC = new Uint8Array([0x55, 0x50, 0x4D, 0x45, 0x01]); // 'UPME\x01'
 const BINARY_HEADER_LEN = BINARY_MAGIC.length + IV_LENGTH; // 5 + 12 = 17 bytes
 
-// Base64 Helpers (safe for browser & node)
+// Base64 Helpers (safe for browser, worker, & node)
 export function bytesToBase64(bytes) {
   const uint8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   if (typeof Buffer !== 'undefined') {
@@ -49,7 +49,9 @@ export function bytesToBase64(bytes) {
     const chunk = uint8.subarray(i, i + CHUNK_SIZE);
     binary += String.fromCharCode.apply(null, chunk);
   }
-  return window.btoa(binary);
+  const btoaFn = (typeof window !== 'undefined' && window.btoa) ? window.btoa.bind(window) : (typeof globalThis !== 'undefined' ? globalThis.btoa : null);
+  if (!btoaFn) throw new Error('Base64 encoding (btoa) not available');
+  return btoaFn(binary);
 }
 
 export function base64ToBytes(base64) {
@@ -64,12 +66,13 @@ export function base64ToBytes(base64) {
   const pad = cleaned.length % 4;
   if (pad === 2) cleaned += '==';
   else if (pad === 3) cleaned += '=';
-  else if (pad === 1) cleaned += '===';
 
   if (typeof Buffer !== 'undefined') {
     return new Uint8Array(Buffer.from(cleaned, 'base64'));
   }
-  const binary = window.atob(cleaned);
+  const atobFn = (typeof window !== 'undefined' && window.atob) ? window.atob.bind(window) : (typeof globalThis !== 'undefined' ? globalThis.atob : null);
+  if (!atobFn) throw new Error('Base64 decoding (atob) not available');
+  const binary = atobFn(cleaned);
   const len = binary.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
@@ -353,30 +356,47 @@ export function setActiveCryptoKey(key) {
   activeCryptoKey = key;
 }
 
+// Safe Storage Resolver (avoids Node.js 22+ ExperimentalWarning and works in Browser/Worker)
+function hasLocalStorage() {
+  try {
+    return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined' && window.localStorage !== null;
+  } catch {
+    return false;
+  }
+}
+
 // In-Memory Storage Fallback (for Node.js test environment or when localStorage is unavailable)
 const memoryStorage = new Map();
 
 function getStorageItem(key) {
-  if (typeof localStorage !== 'undefined') {
-    return localStorage.getItem(key);
+  if (hasLocalStorage()) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return memoryStorage.get(key) || null;
+    }
   }
   return memoryStorage.get(key) || null;
 }
 
 function setStorageItem(key, val) {
-  if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(key, val);
-  } else {
-    memoryStorage.set(key, String(val));
+  if (hasLocalStorage()) {
+    try {
+      window.localStorage.setItem(key, String(val));
+      return;
+    } catch {}
   }
+  memoryStorage.set(key, String(val));
 }
 
 function removeStorageItem(key) {
-  if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem(key);
-  } else {
-    memoryStorage.delete(key);
+  if (hasLocalStorage()) {
+    try {
+      window.localStorage.removeItem(key);
+      return;
+    } catch {}
   }
+  memoryStorage.delete(key);
 }
 
 /**
@@ -425,7 +445,7 @@ export async function unlockWithPairingToken(token) {
   } else if (parsed.type === 'hex_key') {
     const rawBytes = new Uint8Array(32);
     for (let i = 0; i < 32; i++) {
-      rawBytes[i] = parseInt(parsed.value.substr(i * 2, 2), 16);
+      rawBytes[i] = parseInt(parsed.value.slice(i * 2, i * 2 + 2), 16);
     }
     const subtle = getSubtleCrypto();
     key = await subtle.importKey('raw', rawBytes, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);
@@ -478,8 +498,13 @@ export async function initializeEncryptionKey() {
     if (tokenToApply) {
       try {
         const key = await unlockWithPairingToken(tokenToApply);
-        // Clear hash & query params cleanly from address bar without reloading
-        const cleanUrl = window.location.pathname;
+        // Clear hash & sensitive query params cleanly while preserving other parameters like code
+        const searchParams = new URLSearchParams(window.location.search);
+        searchParams.delete('pair');
+        searchParams.delete('key');
+        searchParams.delete('passphrase');
+        const remainingQuery = searchParams.toString();
+        const cleanUrl = window.location.pathname + (remainingQuery ? `?${remainingQuery}` : '');
         window.history.replaceState(null, document.title, cleanUrl);
         return { key, paired: true, source: 'url_pairing' };
       } catch (err) {
@@ -592,7 +617,7 @@ export async function applyKeyOrPassphrase(inputStr) {
   if (parsed.type === 'hex_key') {
     const rawBytes = new Uint8Array(32);
     for (let i = 0; i < 32; i++) {
-      rawBytes[i] = parseInt(parsed.value.substr(i * 2, 2), 16);
+      rawBytes[i] = parseInt(parsed.value.slice(i * 2, i * 2 + 2), 16);
     }
     const subtle = getSubtleCrypto();
     const key = await subtle.importKey('raw', rawBytes, { name: 'AES-GCM' }, true, ['encrypt', 'decrypt']);

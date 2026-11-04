@@ -3,10 +3,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
 
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") || "BCKyt1Zaqd4A2WUFCxedHrZCQXSTlOP2EJo9dYTuaOzzJ0suZmAPZkCLEUkggxsQXuDShNwxo2SQzuHQMyfBTjs";
-const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") || "GnqgoKl1WVzWicq8zCwjlV8O5k1e6xFMLXv6Q4Ttwuk";
+const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY");
 const VAPID_SUBJECT = "https://upmee.vercel.app";
 
-webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+if (!VAPID_PRIVATE_KEY) {
+  console.warn("VAPID_PRIVATE_KEY is not set in environment variables");
+} else {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

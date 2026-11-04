@@ -18,9 +18,17 @@ const STORAGE_ANON_KEY = 'upme_supabase_anon_key';
 const DEFAULT_SUPABASE_URL = 'https://sdsrxmetbtdzhooxqkkh.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_GYM_eBLwWpct8GT6pPuc-g_r_9zEr_1';
 
+function hasLocalStorage() {
+  try {
+    return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined' && window.localStorage !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function getSupabaseConfig() {
-  let url = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_URL_KEY) : null;
-  let key = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_ANON_KEY) : null;
+  let url = hasLocalStorage() ? window.localStorage.getItem(STORAGE_URL_KEY) : null;
+  let key = hasLocalStorage() ? window.localStorage.getItem(STORAGE_ANON_KEY) : null;
 
   if (!url || !url.startsWith('http')) {
     url = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || DEFAULT_SUPABASE_URL;
@@ -33,9 +41,9 @@ export function getSupabaseConfig() {
 }
 
 export function saveSupabaseConfig(url, key) {
-  if (typeof localStorage !== 'undefined') {
-    localStorage.setItem(STORAGE_URL_KEY, url.trim());
-    localStorage.setItem(STORAGE_ANON_KEY, key.trim());
+  if (hasLocalStorage()) {
+    window.localStorage.setItem(STORAGE_URL_KEY, url.trim());
+    window.localStorage.setItem(STORAGE_ANON_KEY, key.trim());
   }
 }
 
@@ -86,11 +94,11 @@ export function getFilePublicUrl(storagePath) {
  * Get or create a persistent device identifier for ownership & delete control
  */
 export function getOrCreateDeviceId() {
-  if (typeof localStorage === 'undefined') return 'server_device';
-  let deviceId = localStorage.getItem('upmee_device_id');
+  if (!hasLocalStorage()) return 'server_device';
+  let deviceId = window.localStorage.getItem('upmee_device_id');
   if (!deviceId) {
     deviceId = 'dev_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
-    localStorage.setItem('upmee_device_id', deviceId);
+    window.localStorage.setItem('upmee_device_id', deviceId);
   }
   return deviceId;
 }
@@ -566,7 +574,8 @@ export async function deleteShareRecordAndStorage(id, storagePath) {
     const { error: dbError } = await supabase
       .from('shares')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .neq('code', 'VAULT1');
 
     if (dbError) {
       console.error('Error deleting share from DB:', dbError);
@@ -603,7 +612,8 @@ export async function batchDeleteShares(items) {
       const { error: dbError } = await supabase
         .from('shares')
         .delete()
-        .in('id', ids);
+        .in('id', ids)
+        .neq('code', 'VAULT1');
 
       if (dbError) {
         console.error('Error batch deleting shares from DB:', dbError);

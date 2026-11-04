@@ -1,7 +1,19 @@
-const CACHE_NAME = 'upmee-pwa-v8';
+const CACHE_NAME = 'upmee-pwa-v9';
+const PRECACHE_ASSETS = [
+  '/',
+  '/index.html',
+  '/bunny_mascot.png',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/manifest.json'
+];
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(PRECACHE_ASSETS).catch(err => console.warn('Precache warning:', err));
+    }).then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
@@ -9,7 +21,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
+          if (cache !== CACHE_NAME && cache !== 'upmee-shared-data') {
             return caches.delete(cache);
           }
         })
@@ -64,8 +76,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Standard Fetch Pass-through (Ensures PWA installability criteria)
+  // 2. Standard Fetch & Cache Handler with Offline Support
   if (event.request.method === 'GET') {
+    if (url.origin === self.location.origin) {
+      event.respondWith((async () => {
+        try {
+          const networkResponse = await fetch(event.request);
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            const cache = await caches.open(CACHE_NAME);
+            cache.put(event.request, networkResponse.clone());
+          }
+          return networkResponse;
+        } catch (_) {
+          const cachedResponse = await caches.match(event.request);
+          if (cachedResponse) return cachedResponse;
+          if (event.request.mode === 'navigate') {
+            const indexCached = (await caches.match('/index.html')) || (await caches.match('/'));
+            if (indexCached) return indexCached;
+          }
+          return new Response('Offline', { status: 503, statusText: 'Offline' });
+        }
+      })());
+      return;
+    }
+
     event.respondWith(
       fetch(event.request).catch(() => caches.match(event.request))
     );
