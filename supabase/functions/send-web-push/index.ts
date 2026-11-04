@@ -56,11 +56,34 @@ serve(async (req) => {
       bodyText = `ข้อความใหม่: ${newRecord.content.substring(0, 40)}`;
     }
 
+    const isFile = newRecord.type === 'file' || newRecord.type === 'both' || Boolean(newRecord.file_name || newRecord.storage_path);
+    const hasText = Boolean(newRecord.content);
+
+    let pushActions = [];
+    if (isFile && hasText) {
+      pushActions = [
+        { action: "download", title: "💾 ดาวน์โหลด" },
+        { action: "copy", title: "📋 คัดลอก" }
+      ];
+    } else if (isFile) {
+      pushActions = [
+        { action: "download", title: "💾 ดาวน์โหลด" },
+        { action: "open", title: "👀 เปิดดู" }
+      ];
+    } else {
+      pushActions = [
+        { action: "copy", title: "📋 คัดลอก" },
+        { action: "open", title: "👀 เปิดดู" }
+      ];
+    }
+
     const pushPayload = JSON.stringify({
       title: "UpMee 🐰 มีไฟล์/ข้อความใหม่!",
       body: bodyText,
       icon: "/bunny_mascot.png",
-      url: "/"
+      url: "/",
+      data: newRecord,
+      actions: pushActions
     });
 
     const sendPromises = subs.map(async (sub) => {

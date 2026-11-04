@@ -1,4 +1,4 @@
-const CACHE_NAME = 'upmee-pwa-v9';
+const CACHE_NAME = 'upmee-pwa-v10';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -145,6 +145,30 @@ self.addEventListener('push', (event) => {
   // Deduplication tag based on item ID
   const itemTag = 'upmee-share-' + (payloadData.id || payloadData.created_at || 'item');
 
+  // Interactive Notification Action Buttons (Download / Copy / Open)
+  const isFileItem = payloadData.type === 'file' || payloadData.type === 'both' || Boolean(payloadData.file_name || payloadData.storage_path);
+  const hasTextContent = Boolean(payloadData.content);
+
+  let actions = Array.isArray(payloadData.actions) && payloadData.actions.length > 0 ? payloadData.actions : [];
+  if (actions.length === 0) {
+    if (isFileItem && hasTextContent) {
+      actions = [
+        { action: 'download', title: '💾 ดาวน์โหลด' },
+        { action: 'copy', title: '📋 คัดลอก' }
+      ];
+    } else if (isFileItem) {
+      actions = [
+        { action: 'download', title: '💾 ดาวน์โหลด' },
+        { action: 'open', title: '👀 เปิดดู' }
+      ];
+    } else {
+      actions = [
+        { action: 'copy', title: '📋 คัดลอก' },
+        { action: 'open', title: '👀 เปิดดู' }
+      ];
+    }
+  }
+
   const options = {
     body: bodyText,
     icon: iconUrl,
@@ -152,7 +176,8 @@ self.addEventListener('push', (event) => {
     vibrate: [200, 100, 200, 100, 200],
     tag: itemTag,
     renotify: false,
-    data: payloadData
+    data: payloadData,
+    actions: actions
   };
 
   if (imageUrl) {
@@ -175,15 +200,33 @@ self.addEventListener('push', (event) => {
 // Notification Click Handler on Mobile / Desktop
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  const action = event.action; // 'download' | 'copy' | 'open' | ''
+  const payloadData = event.notification.data || {};
+  const itemId = payloadData.id || '';
+
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // 1. If an UpMee tab is already open, focus it and deliver action via postMessage
       for (const client of clientList) {
         if (client.url.includes(self.registration.scope) && 'focus' in client) {
+          client.postMessage({
+            type: 'UPMEE_NOTIFICATION_ACTION',
+            action: action || 'open',
+            item: payloadData,
+            itemId: itemId
+          });
           return client.focus();
         }
       }
+
+      // 2. If no tab is open, open a new window with action query params
+      let targetUrl = '/';
+      if (action || itemId) {
+        targetUrl = `/?action=${encodeURIComponent(action || 'open')}${itemId ? `&id=${encodeURIComponent(itemId)}` : ''}`;
+      }
+
       if (clients.openWindow) {
-        return clients.openWindow('/');
+        return clients.openWindow(targetUrl);
       }
     })
   );

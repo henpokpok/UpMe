@@ -261,6 +261,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // initDeviceGatekeeper will call refreshAppFeed() if authorized
   await initDeviceGatekeeper();
   initRealtimeSubscription();
+  initNotificationActionListeners();
   checkSharedDataFromGallery();
 
   // Auto-refresh feed when tab becomes active & pause CSS animations when hidden
@@ -581,12 +582,13 @@ function closeHistoryPopover() {
   if (historyPopover) historyPopover.classList.add('hidden');
 }
 
-// --- Trigger Cross-Platform System Notification ---
+// --- Trigger Cross-Platform System Notification with Interactive Actions ---
 function triggerSystemNotification(newRecord) {
   if (!('Notification' in window)) return;
   if (Notification.permission !== 'granted') return;
 
   const isFile = newRecord.type === 'file' || newRecord.type === 'both' || Boolean(newRecord.storage_path);
+  const hasText = Boolean(newRecord.content);
   const title = 'UpMee 🐰';
   let bodyText = '';
 
@@ -598,6 +600,25 @@ function triggerSystemNotification(newRecord) {
 
   const itemTag = 'upmee-share-' + (newRecord.id || newRecord.created_at || 'item');
 
+  // Interactive Notification Action Buttons (Download / Copy / Open)
+  let actions = [];
+  if (isFile && hasText) {
+    actions = [
+      { action: 'download', title: '💾 ดาวน์โหลด' },
+      { action: 'copy', title: '📋 คัดลอก' }
+    ];
+  } else if (isFile) {
+    actions = [
+      { action: 'download', title: '💾 ดาวน์โหลด' },
+      { action: 'open', title: '👀 เปิดดู' }
+    ];
+  } else {
+    actions = [
+      { action: 'copy', title: '📋 คัดลอก' },
+      { action: 'open', title: '👀 เปิดดู' }
+    ];
+  }
+
   const options = {
     body: bodyText,
     icon: '/bunny_mascot.png',
@@ -605,7 +626,8 @@ function triggerSystemNotification(newRecord) {
     vibrate: [200, 100, 200],
     tag: itemTag,
     renotify: false,
-    data: newRecord
+    data: newRecord,
+    actions: actions
   };
 
   if ('serviceWorker' in navigator) {
@@ -616,6 +638,83 @@ function triggerSystemNotification(newRecord) {
     });
   } else {
     new Notification(title, options);
+  }
+}
+
+// --- Interactive Notification Actions Handler (Download / Copy / Open) ---
+async function handleNotificationAction({ action, item, itemId }) {
+  if (!action) return;
+
+  let targetItem = item;
+  if ((!targetItem || !targetItem.id) && itemId) {
+    targetItem = currentSharesList.find(s => s.id === itemId);
+    if (!targetItem) {
+      const shares = await getActiveSharesList();
+      currentSharesList = shares || [];
+      targetItem = currentSharesList.find(s => s.id === itemId);
+    }
+  }
+
+  if (!targetItem) {
+    console.warn('Target item for notification action not found:', itemId);
+    return;
+  }
+
+  // If item in payload was encrypted raw ciphertext, pick decrypted item from currentSharesList
+  if (targetItem.content && targetItem.content.includes('"e2ee":true')) {
+    const decryptedMatch = currentSharesList.find(s => s.id === targetItem.id);
+    if (decryptedMatch && !decryptedMatch._isLocked) {
+      targetItem = decryptedMatch;
+    }
+  }
+
+  if (action === 'download') {
+    const fileUrl = getFilePublicUrl(targetItem.storage_path) || targetItem.content;
+    const fileName = targetItem.file_name || 'download';
+    if (targetItem.storage_path || fileUrl) {
+      markItemAsAccessed(targetItem.id);
+      showToast(`💾 กำลังดาวน์โหลด ${fileName}...`);
+      await downloadFileDirectly(fileUrl, fileName, targetItem.storage_path);
+    } else {
+      showToast('⚠️ ไม่พบไฟล์สำหรับดาวน์โหลด');
+    }
+  } else if (action === 'copy') {
+    if (targetItem.content) {
+      markItemAsAccessed(targetItem.id);
+      await copyToClipboard(targetItem.content, '📋 คัดลอกข้อความจากแจ้งเตือนเรียบร้อยแล้ว!');
+    } else {
+      showToast('⚠️ ไม่พบข้อความสำหรับคัดลอก');
+    }
+  } else if (action === 'open') {
+    openItemPreviewModal(targetItem);
+  }
+}
+
+function initNotificationActionListeners() {
+  // 1. Listen for postMessage from Service Worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data && event.data.type === 'UPMEE_NOTIFICATION_ACTION') {
+        handleNotificationAction(event.data);
+      }
+    });
+  }
+
+  // 2. Check URL search params for deep links opened from notification
+  const urlParams = new URLSearchParams(window.location.search);
+  const actionParam = urlParams.get('action');
+  const idParam = urlParams.get('id');
+
+  if (actionParam && (actionParam === 'download' || actionParam === 'copy' || actionParam === 'open')) {
+    urlParams.delete('action');
+    urlParams.delete('id');
+    const remaining = urlParams.toString();
+    const cleanUrl = window.location.pathname + (remaining ? `?${remaining}` : '');
+    window.history.replaceState(null, document.title, cleanUrl);
+
+    setTimeout(() => {
+      handleNotificationAction({ action: actionParam, itemId: idParam });
+    }, 450);
   }
 }
 
