@@ -666,3 +666,40 @@ export async function getStorageUsageInfo(providedShares = null) {
     return { totalBytes: 0, activeCount: 0 };
   }
 }
+
+/**
+ * Clean up expired shares and their physical files in Supabase Storage via official Storage API
+ */
+export async function cleanExpiredSharesClientSide() {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { cleanedCount: 0 };
+
+  try {
+    const { data: expiredShares, error } = await supabase
+      .from('shares')
+      .select('id, storage_path')
+      .lt('expires_at', new Date().toISOString())
+      .neq('code', 'VAULT1')
+      .limit(50);
+
+    if (error || !expiredShares || expiredShares.length === 0) {
+      return { cleanedCount: 0 };
+    }
+
+    const storagePaths = expiredShares.map(s => s.storage_path).filter(Boolean);
+    const ids = expiredShares.map(s => s.id);
+
+    if (storagePaths.length > 0) {
+      await supabase.storage.from('user-shares').remove(storagePaths);
+    }
+
+    if (ids.length > 0) {
+      await supabase.from('shares').delete().in('id', ids).neq('code', 'VAULT1');
+    }
+
+    return { cleanedCount: expiredShares.length };
+  } catch (err) {
+    console.warn('Auto cleanup error:', err);
+    return { cleanedCount: 0 };
+  }
+}

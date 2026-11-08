@@ -13,7 +13,8 @@ import {
   getFilePublicUrl,
   setupVaultChallenge,
   verifyPassphraseAgainstVault,
-  decryptAndFetchFileBlob
+  decryptAndFetchFileBlob,
+  cleanExpiredSharesClientSide
 } from './supabase.js';
 import {
   initializeEncryptionKey,
@@ -1334,6 +1335,9 @@ async function refreshAppFeed() {
     // 1. Fetch active shares list once
     const sharesList = await getActiveSharesList();
     currentSharesList = sharesList || [];
+
+    // Background passive cleanup for any expired shares via Storage API
+    cleanExpiredSharesClientSide().catch(() => {});
 
     // 2. Storage Bar % Calculation directly from pre-fetched list
     const { totalBytes } = await getStorageUsageInfo(currentSharesList);
