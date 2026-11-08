@@ -470,6 +470,9 @@ export async function getActiveSharesList() {
 
     if (error) {
       console.error('Error fetching active shares:', error);
+      if (error.message && (error.message.includes('exceed_storage_size_quota') || error.message.includes('restricted'))) {
+        throw new Error('Supabase Storage เต็มโควตา (เกิน 1 GB) ทำให้ระบบถูกระงับชั่วคราว');
+      }
       return [];
     }
 

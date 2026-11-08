@@ -1,5 +1,5 @@
 -- ==========================================================================
--- UpMee — Production Supabase SQL Setup & Security Hardening
+-- UpMee — Production Supabase SQL Setup, Auto Storage Cleanup & Hardening
 -- ==========================================================================
 
 -- 1. Create Shares Table
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS public.push_subscriptions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. Row Level Security (RLS) Policies
+-- 3. Row Level Security (RLS) Policies for Shares Table
 ALTER TABLE public.shares ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
 
@@ -53,19 +53,18 @@ CREATE POLICY "Allow public update shares" ON public.shares
   USING (true) 
   WITH CHECK (true);
 
--- Shares: Protected Delete (Crucial: Protects master VAULT1 challenge from being deleted)
+-- Shares: Protected Delete (Protects master VAULT1 challenge from deletion)
 DROP POLICY IF EXISTS "Allow public delete shares" ON public.shares;
 CREATE POLICY "Allow public delete shares" ON public.shares 
   FOR DELETE TO anon, authenticated 
   USING (code != 'VAULT1');
 
--- Push Subscriptions: Allow Insert (Privacy hardened: anon cannot SELECT other users' tokens)
+-- Push Subscriptions: Allow Insert
 DROP POLICY IF EXISTS "Allow public insert push_subscriptions" ON public.push_subscriptions;
 CREATE POLICY "Allow public insert push_subscriptions" ON public.push_subscriptions 
   FOR INSERT TO anon, authenticated 
   WITH CHECK (true);
 
--- Revoke public SELECT on push_subscriptions to protect user privacy (Edge function uses service_role)
 DROP POLICY IF EXISTS "Allow public select push_subscriptions" ON public.push_subscriptions;
 
 -- 4. Enable Supabase Realtime Broadcasts on shares table
@@ -79,20 +78,76 @@ BEGIN
   END IF;
 END $$;
 
--- 5. Automated Storage & Record Cleanup Routine (Runs every 5 minutes if pg_cron is enabled)
+-- 5. Storage Bucket Setup & Storage RLS Policies
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('user-shares', 'user-shares', true, 52428800) -- 50MB per file
+ON CONFLICT (id) DO UPDATE SET public = true, file_size_limit = 52428800;
+
+DROP POLICY IF EXISTS "Public Read Access for user-shares" ON storage.objects;
+CREATE POLICY "Public Read Access for user-shares"
+ON storage.objects FOR SELECT TO anon, authenticated
+USING (bucket_id = 'user-shares');
+
+DROP POLICY IF EXISTS "Public Upload Access for user-shares" ON storage.objects;
+CREATE POLICY "Public Upload Access for user-shares"
+ON storage.objects FOR INSERT TO anon, authenticated
+WITH CHECK (bucket_id = 'user-shares');
+
+DROP POLICY IF EXISTS "Public Delete Access for user-shares" ON storage.objects;
+CREATE POLICY "Public Delete Access for user-shares"
+ON storage.objects FOR DELETE TO anon, authenticated
+USING (bucket_id = 'user-shares');
+
+-- 6. CRITICAL FIX: AUTOMATIC STORAGE CLEANUP TRIGGER
+-- When a row is deleted from public.shares, automatically delete the physical file from storage.objects!
+CREATE OR REPLACE FUNCTION public.handle_deleted_share_storage()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.storage_path IS NOT NULL AND OLD.storage_path != '' THEN
+    DELETE FROM storage.objects 
+    WHERE bucket_id = 'user-shares' 
+      AND name = OLD.storage_path;
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_delete_share_storage ON public.shares;
+CREATE TRIGGER trigger_delete_share_storage
+AFTER DELETE ON public.shares
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_deleted_share_storage();
+
+-- 7. Automated Storage & Record Cleanup Routine
 CREATE OR REPLACE FUNCTION public.clean_expired_shares()
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 BEGIN
-  -- Delete expired shares (excluding permanent VAULT1 challenge)
+  -- 1. Explicitly clean storage.objects for expired records
+  DELETE FROM storage.objects
+  WHERE bucket_id = 'user-shares'
+    AND name IN (
+      SELECT storage_path FROM public.shares 
+      WHERE expires_at < NOW() AND storage_path IS NOT NULL AND code != 'VAULT1'
+    );
+
+  -- 2. Delete expired shares database records (trigger will also guarantee cleanup)
   DELETE FROM public.shares
   WHERE expires_at < NOW() AND code != 'VAULT1';
+
+  -- 3. Delete any orphaned storage objects with no matching record in public.shares
+  DELETE FROM storage.objects
+  WHERE bucket_id = 'user-shares'
+    AND name NOT IN (
+      SELECT storage_path FROM public.shares 
+      WHERE storage_path IS NOT NULL
+    );
 END;
 $$;
 
--- Schedule cron job if pg_cron extension exists
+-- 8. Schedule pg_cron every 5 minutes if extension is active
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN

@@ -1390,9 +1390,17 @@ async function refreshAppFeed() {
     updateBatchUI();
   } catch (err) {
     if (liveFeedContainer) {
+      const isQuota = err.message && (err.message.includes('exceed_storage_size_quota') || err.message.includes('โควตา') || err.message.includes('restricted'));
       liveFeedContainer.innerHTML = `
-        <div class="empty-feed-box">
-          <p>Error loading items: ${err.message}</p>
+        <div class="empty-feed-box" style="border: 1.5px dashed ${isQuota ? '#ef4444' : 'var(--card-border)'}; padding: 20px 16px;">
+          <p style="font-weight: 600; font-size: 0.95rem; color: ${isQuota ? '#dc2626' : 'inherit'};">
+            ${isQuota ? '⚠️ Supabase Storage เต็มเกินโควตา 1 GB' : 'Error loading items'}
+          </p>
+          <p style="font-size: 0.82rem; margin-top: 6px; line-height: 1.5; color: #6b7280;">
+            ${isQuota 
+              ? 'พื้นที่เก็บไฟล์บน Supabase เต็มโควตา Free Tier (1.6 GB / 1.0 GB) กรุณาเข้าไปที่ Supabase Dashboard เพื่อลบไฟล์ที่หมดอายุ' 
+              : escapeHtml(err.message)}
+          </p>
         </div>
       `;
     }
